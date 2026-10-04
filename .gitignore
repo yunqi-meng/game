@@ -1,0 +1,26 @@
+# 依赖与构建产物（可再生，勿入库）
+node_modules/
+admin/dist/
+server/target/
+
+# 运行时产物
+*.log
+server/boot.log
+
+# 本地密钥/环境（真实凭证只走本地 .env，绝不提交）
+.env
+server/.env
+
+# 旧版后端运行数据（归档，含历史测试账号）
+legacy/server-data/
+
+# 编辑器 / 系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.orig
+
+# 数据库快照（含玩家数据，绝不入库）
+/backups/

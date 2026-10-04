@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#10497f">
+<title>化学实验室：元素纪元</title>
+<link rel="apple-touch-icon" href="images/icon-512.png">
+<link rel="icon" type="image/png" href="images/icon-512.png">
+<link rel="stylesheet" href="css/style.css?v=3.9">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="lv-chip"><span>Lv.<b id="ui-level">1</b></span>
+      <div class="expbar"><i id="ui-exp"></i></div>
+    </div>
+    <div class="coins">🪙 <b id="ui-coins">0</b> <span class="dim">💎</span><b id="ui-diamonds">0</b></div>
+    <div class="top-btns">
+      <button id="btn-mode" class="pill"></button>
+      <button id="btn-quiz" class="pill">📝</button>
+      <button id="btn-hint" class="pill" title="助手精灵：提示方程式">🧚</button>
+    </div>
+  </header>
+
+  <div id="stage">
+    <main id="bench" class="page on">
+      <div id="room-tabs"></div>
+      <div id="banner" class="hidden"></div>
+      <div id="bench-stage" class="drop-zone">
+        <div id="vessel-card" title="点击切换仪器">
+          <!-- 图标与液体都由 js/icons.js 现画：液体画在容器轮廓内部，换容器时形状跟着走 -->
+          <div id="vessel-icon"></div>
+          <div id="vessel-name">烧杯</div>
+          <div id="vessel-tier">普通 · 粗产物</div>
+        </div>
+        <ul id="placed-list"></ul>
+        <canvas id="fx-canvas"></canvas>
+        <div id="drop-hint">从下方物质架点选，或拖到台面上投放</div>
+      </div>
+
+      <!-- 实验台自带投放源：整页化后不必再切出去开抽屉，台面随时可投 -->
+      <div id="quick-shelf">
+        <div class="qs-head"><b>物质架</b><span id="qs-tip"></span><button id="qs-restock" class="qs-act hidden"></button></div>
+        <div id="qs-row"></div>
+      </div>
+
+      <div id="controls">
+        <div class="ctl-group" id="temp-group">
+          <span class="ctl-lbl">条件</span>
+          <button class="temp-btn on" data-t="room">室温</button>
+          <button class="temp-btn" data-t="heat">加热</button>
+          <button class="temp-btn" data-t="ignite">点燃</button>
+          <button class="temp-btn" data-t="highTemp">高温</button>
+        </div>
+        <div class="ctl-group">
+          <span class="ctl-lbl">用量</span>
+          <button id="btn-elec" class="temp-btn">⚡电解</button>
+          <select id="sel-mult">
+            <option value="1">×1</option><option value="2">×2</option>
+            <option value="5">×5</option><option value="10">×10</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="cost-preview"></div>
+
+      <div id="actionbar">
+        <label id="ins-wrap" class="hidden"><input type="checkbox" id="chk-ins">实验保险（事故理赔50%）</label>
+        <button id="btn-react">⚗️ 开始反应</button>
+        <button id="btn-clear" class="ghost">清空</button>
+      </div>
+    </main>
+
+    <!-- 每个底部图标 = 一整页（不再是向上弹出的抽屉）；实验台是它的兄弟页 -->
+    <section id="page" class="page">
+      <div id="page-head"><b id="page-title"></b><small id="page-sub"></small></div>
+      <!-- 页内分段条：一页里按"动作类型"分格，段上的数字=现在有几件事可做 -->
+      <div id="page-segs" class="segbar hidden"></div>
+      <div id="page-body"></div>
+      <!-- 投放后就地给一个回实验台的落点，省掉一次导航点击 -->
+      <button id="page-fab" class="hidden"></button>
+    </section>
+  </div>
+
+  <!-- 角标由 js/ui.js 的 updateNav() 画，数字与分段条同源（panels.js claimCounts/buyableCount） -->
+  <nav id="bottom-nav">
+    <button data-tab="bench" class="on">⚗️<i>实验台</i></button>
+    <button data-tab="bag">🧪<i>物质</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="codex">📚<i>图鉴</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="market">🏪<i>市场</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="tasks">📋<i>任务</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="lab">🏗️<i>建设</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="settings">⚙️<i>设置</i><em class="nav-badge hidden"></em></button>
+  </nav>
+
+  <div id="modal-root" class="hidden">
+    <div id="modal-card"></div>
+  </div>
+
+  <div id="toasts"></div>
+  <div id="drag-ghost" class="hidden"></div>
+  <div id="tutorial-root" class="hidden">
+    <div id="tutorial-card"></div>
+  </div>
+</div>
+
+<div id="boot-root">
+  <div id="boot-card">
+    <div class="boot-emoji">🧪</div>
+    <h3>化学实验室：元素纪元</h3>
+    <div id="boot-msg">正在连接服务器…</div>
+    <div id="boot-actions"></div>
+    <div class="boot-foot">在线游戏 · 进度实时保存在服务器，登录后可跨设备继续</div>
+  </div>
+</div>
+
+<div id="gate-root" class="hidden">
+  <div id="gate-card">
+    <div class="gate-head">
+      <div class="gate-emoji">🧪</div>
+      <h3>化学实验室：元素纪元</h3>
+      <p class="gate-slogan">118 种元素 · 143 条配平方程式 · 从电解第一瓢水开始</p>
+      <p class="gate-welcome" id="gate-welcome"></p>
+    </div>
+
+    <div class="tabs gate-tabs" id="gate-tabs">
+      <button type="button" class="on" data-m="login">登录</button>
+      <button type="button" data-m="reg">注册新账号</button>
+    </div>
+
+    <form id="gate-form" autocomplete="off">
+      <label class="gate-lbl" for="gate-u">用户名</label>
+      <input class="inp" id="gate-u" type="text" maxlength="24" autocapitalize="none" placeholder="2-24 位：中文、字母、数字或下划线">
+      <label class="gate-lbl" for="gate-p">密码</label>
+      <div class="gate-pw">
+        <input class="inp" id="gate-p" type="password" maxlength="64" placeholder="至少 6 位">
+        <button class="gate-eye" id="gate-eye" type="button" title="显示 / 隐藏密码">👁</button>
+      </div>
+      <div class="gate-nick hidden" id="gate-nrow">
+        <label class="gate-lbl" for="gate-n">昵称（选填）</label>
+        <input class="inp" id="gate-n" type="text" maxlength="24" placeholder="显示在排行榜与好友列表，默认同名">
+      </div>
+      <div class="gate-err hidden" id="gate-err" role="alert"></div>
+      <button class="ok" id="gate-go" type="submit">登录并进入实验室</button>
+      <button class="gate-forgot" id="gate-forgot" type="button">忘记密码？</button>
+      <div class="gate-help hidden" id="gate-help">
+        <p><b>怎么找回</b></p>
+        <p>进度都存在服务器，口令只能由管理员在你的身份核实后重置：把<b>用户名</b>发给游戏管理员，后台【用户管理 → 重置口令】会给你一个临时口令，登录后请尽快在【设置-账号】里改成自己的。</p>
+        <p>重置后其它设备将无法再自动续期（已经打开的页面最长还能用到访问令牌自然过期，约 2 小时）。</p>
+        <p><b>只是试玩过、没注册</b></p>
+        <p>那多半是游客档：直接点下方【以游客身份进入】会开一个<b>全新的</b>游客档，旧游客档无法凭口令找回。所以请尽快在游戏内【设置-账号】转正成正式账号。</p>
+      </div>
+    </form>
+
+    <div class="gate-or"><span>或</span></div>
+    <button class="gate-guest" id="gate-guest" type="button">🎈 以游客身份进入</button>
+    <p class="hint-p" id="gate-tip"></p>
+    <div class="gate-foot"><i class="dot" id="gate-dot"></i><span id="gate-server"></span></div>
+  </div>
+</div>
+
+<script src="js/data/elements.js?v=3.9"></script>
+<script src="js/data/compounds.js?v=3.9"></script>
+<script src="js/data/reactions.js?v=3.9"></script>
+<script src="js/data/instruments.js?v=3.9"></script>
+<script src="js/content.js?v=3.9"></script>
+<script src="js/state.js?v=3.9"></script>
+<script src="js/engine.js?v=3.9"></script>
+<script src="js/fx.js?v=3.9"></script>
+<script src="js/sfx.js?v=3.9"></script>
+<script src="js/cloud.js?v=3.9"></script>
+<script src="js/gate.js?v=3.9"></script>
+<script src="js/icons.js?v=3.9"></script>
+<script src="js/ui.js?v=3.9"></script>
+<script src="js/panels.js?v=3.9"></script>
+<script src="js/game.js?v=3.9"></script>
+<script src="js/main.js?v=3.9"></script>
+</body>
+</html>

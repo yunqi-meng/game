@@ -1,0 +1,40 @@
+# 生产/公网可访问环境用：SPRING_PROFILES_ACTIVE=mysql,prod
+# 与开发配置的差别全部集中在"默认值不再宽容"：密钥必须给、跨域默认关、限流收紧、口令哈希加重。
+
+chemera:
+  jwt:
+    # 不给就启动失败（JwtService 校验 ≥32 字节），避免带着仓库里的开发默认密钥上线
+    secret: ${CHEMERA_JWT_SECRET:}
+  security:
+    # 只有前置 Nginx/Caddy 会重写该头时才打开
+    trust-forwarded-for: ${CHEMERA_TRUST_XFF:true}
+    bcrypt-strength: 12
+  cors:
+    # 同域部署留空即完全不下发跨域许可；确需分离域名时改成具体来源
+    allowed-origins: ${CHEMERA_CORS_ORIGINS:}
+  guard:
+    enabled: true
+    login-max: 20
+    login-window-minutes: 10
+    login-fail-max: 5
+    login-lock-minutes: 30
+    register-max: 5
+    register-window-minutes: 60
+    guest-max: 10
+    guest-window-minutes: 60
+    admin-max: 10
+    admin-window-minutes: 60
+    admin-fail-max: 5
+    admin-lock-minutes: 60
+
+server:
+  # 反代之后的真实协议/IP 才可信（配合 trust-forwarded-for）
+  forward-headers-strategy: native
+  error:
+    include-message: never
+    include-stacktrace: never
+
+logging:
+  level:
+    root: INFO
+    com.chemera.server: INFO

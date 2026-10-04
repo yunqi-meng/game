@@ -1,0 +1,70 @@
+server:
+  port: ${SERVER_PORT:8080}
+  compression:
+    enabled: true
+
+spring:
+  application:
+    name: chemera-server
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:mysql}
+  mvc:
+    static-path-pattern: /**
+  jackson:
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 1MB
+      max-request-size: 2MB
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-fetch-size: 100
+    default-statement-timeout: 30
+  mapper-locations: classpath*:mapper/*.xml
+  type-aliases-package: com.chemera.server.entity
+
+chemera:
+  jwt:
+    # 生产环境务必用环境变量 CHEMERA_JWT_SECRET 覆盖；prod profile 下若仍是默认值则拒绝启动
+    secret: ${CHEMERA_JWT_SECRET:change-me-dev-secret-please-set-env-min-32-chars-long}
+    access-ttl-minutes: ${CHEMERA_ACCESS_TTL:120}
+    refresh-ttl-days: ${CHEMERA_REFRESH_TTL:30}
+  session:
+    revoked-retention-days: 7
+  save:
+    max-bytes: 2097152
+  seed-admin:
+    username: ${CHEMERA_SEED_ADMIN_USER:admin}
+    # 留空则不重置已存在管理员密码；首次启动用它创建默认管理员
+    password: ${CHEMERA_SEED_ADMIN_PASS:}
+  security:
+    # 只有前面确实站了可信反代时才打开，否则 X-Forwarded-For 可被伪造用来绕限流
+    trust-forwarded-for: ${CHEMERA_TRUST_XFF:false}
+    bcrypt-strength: ${CHEMERA_BCRYPT_STRENGTH:10}
+  cors:
+    # 开发期允许本机任意端口热调前端；生产留空即完全不下发跨域许可
+    allowed-origins: ${CHEMERA_CORS_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+  guard:
+    # 鉴权端点的防爆破闸门（进程内计数，重启清零）
+    enabled: ${CHEMERA_GUARD:true}
+    login-max: 200                      # 单 IP 每窗口的登录请求数（开发期跑回归脚本要宽松）
+    login-window-minutes: 10
+    login-fail-max: 8                   # 单 IP+用户名 连续失败次数
+    login-lock-minutes: 15
+    register-max: 20
+    register-window-minutes: 60
+    guest-max: 40                       # 游客档每次落一行 app_user
+    guest-window-minutes: 60
+    admin-max: 20
+    admin-window-minutes: 30
+    admin-fail-max: 5
+    admin-lock-minutes: 30
+
+logging:
+  level:
+    com.chemera.server: INFO
+    org.flywaydb: INFO
+  file:
+    name: ${CHEMERA_LOG_FILE:logs/chemera.log}
