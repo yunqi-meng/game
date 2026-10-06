@@ -1,4 +1,5 @@
-/* 音效与音乐：WebAudio 合成，零素材文件；音量存 d.volSfx / d.volMus，音乐开关 d.music */
+/* 音效与音乐：WebAudio 合成，零素材文件；音量存 d.volSfx / d.volMus，音乐开关 d.music
+   触感不写在存档里：它是设备偏好（同一账号换台不该跟着走），存 localStorage，见下面 HAPTIC 段。 */
 (function () {
   "use strict";
   window.CHEM = window.CHEM || {};
@@ -60,7 +61,35 @@
     pour: function (c) { noise(c, 0, 0.25, 0.08, 2400); }
   };
 
+  /* ---------- 触感（H4） ----------
+     全站原先一处 navigator.vibrate 都没有：合成成功、实验事故、升级这三种"结果已定"的时刻
+     只有画面和声音，手机握在手里却没有反馈。只给这三处，且都是 10–20ms 的单次短振——
+     长振动既费电又更像故障，而点击类反馈每一跳都振一遍只会让人关掉它。 */
+  var BUZZ = { success: 12, boom: 20, levelup: 16 };
+  var HK = "chemera.haptic";
+  function hapticOn() {
+    try { return localStorage.getItem(HK) !== "off"; } catch (e) { return true; }   // 隐私模式取不到：按默认开
+  }
+  S.hapticOn = hapticOn;
+  /** 纯客户端开关：不进存档，所以不用 run("settings")，也不会因为换设备而变。 */
+  S.setHaptic = function (on) {
+    try { localStorage.setItem(HK, on ? "on" : "off"); } catch (e) {}
+    return !!on;
+  };
+  /** 三层都过关才真振：① 支持这个 API（iOS Safari 与旧 WebView 没有）② 用户没关 ③ 调用本身不抛。
+      返回值只用来给判断/回归用，页面不消费它。 */
+  S.buzz = function (name) {
+    var ms = BUZZ[name];
+    if (!ms || !hapticOn()) return false;
+    var n = window.navigator;
+    if (!n || typeof n.vibrate !== "function") return false;
+    try { return !!n.vibrate(ms); } catch (e) { return false; }
+  };
+  S.buzzMs = function (name) { return BUZZ[name] || 0; };
+
   S.play = function (name) {
+    /* 触感排在音量闸门之前：静音是"别出声"，不是"别理我"，炸了总得手里抖一下。 */
+    S.buzz(name);
     try {
       var d = CHEM.state && CHEM.state.data;
       vg = d ? (d.volSfx || 0) / 100 : 0;
@@ -101,9 +130,35 @@
       clearInterval(musTimer); musTimer = null;
     }
   };
-  /* 浏览器自动播放策略：若用户已开启音乐但上下文被挂起，首次交互时补启动 */
-  document.addEventListener("pointerdown", function unlock() {
+  /* ---------- 首次手势把音频唤醒（H4） ----------
+     原先的写法是"网络回调里第一次 play 时才 new AudioContext"。在线版每条音效都是服务端结算
+     回来才响的（ui.js 收到结果才 play），那一次创建/`resume()` 都发生在手势之外：
+     WebView 起来就是 suspended，而 Chrome 的自动播放策略正是要拒掉手势外的 resume——
+     于是整局听不见声音，屏幕上都看不出哪里坏了。安卓壳的 setMediaPlaybackRequiresUserGesture
+     仍然是 true（不用手势外的方式起音频这条策略不动），改的是"在第一次触碰里就把引擎点火"。
+     监听不摘：被系统抢走音频焦点之后 context 会再次进 suspended，下一次触碰要能再救回来。 */
+  var warmed = false;
+  function unlock() {
+    var c = ac();
+    if (!c) return false;
+    try {
+      // iOS WebKit 认的是"手势里真播过一次"，播一帧静音 buffer 就够，不占听觉。
+      if (!warmed && c.state === "running") {
+        var b = c.createBuffer(1, 1, c.sampleRate), s = c.createBufferSource();
+        s.buffer = b; s.connect(c.destination); s.start(0);
+        warmed = true;
+      }
+    } catch (e) { /* 没有 createBuffer 的实现：不影响主流程 */ }
     var d = CHEM.state && CHEM.state.data;
     if (d && d.music && !musTimer) S.setMusic(true);
-  }, { passive: true });
+    return c.state === "running";
+  }
+  S.unlock = unlock;
+  /** 给真机排查用的读数：卡在哪一步（没建起来 / 建了但 suspended / 已 running）一眼能分。 */
+  S.audioState = function () {
+    return { created: !!ctx, state: ctx ? ctx.state : "none", warmed: warmed, music: !!musTimer };
+  };
+  document.addEventListener("pointerdown", function () {
+    try { unlock(); } catch (e) { /* 唤醒失败就等下一次触碰，绝不把这次点击本身带崩 */ }
+  }, { capture: true, passive: true });
 })();

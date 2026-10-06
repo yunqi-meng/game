@@ -2,12 +2,15 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- H5：原来这里还带着 maximum-scale=1, user-scalable=no（禁掉系统缩放）。
+     低视力玩家靠的就是双指放大，禁它等于把人挡在门外；布局已按 dvh + flex 走，
+     放大只会多一层滚动，不会把台面挤坏。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#10497f">
 <title>化学实验室：元素纪元</title>
 <link rel="apple-touch-icon" href="images/icon-512.png">
 <link rel="icon" type="image/png" href="images/icon-512.png">
-<link rel="stylesheet" href="css/style.css?v=3.9">
+<link rel="stylesheet" href="css/style.css?v=3.14">
 </head>
 <body>
 <div id="app">
@@ -15,27 +18,34 @@
     <div class="lv-chip"><span>Lv.<b id="ui-level">1</b></span>
       <div class="expbar"><i id="ui-exp"></i></div>
     </div>
-    <div class="coins">🪙 <b id="ui-coins">0</b> <span class="dim">💎</span><b id="ui-diamonds">0</b></div>
+    <div class="coins"><span aria-hidden="true">🪙</span> <b id="ui-coins">0</b><span class="sr-only">金币</span>
+      <span class="dim" aria-hidden="true">💎</span><b id="ui-diamonds">0</b><span class="sr-only">钻石</span></div>
     <div class="top-btns">
+      <!-- 断线/重连指示：只在有请求在途或失败时出现，平时不占顶栏位置（C4） -->
+      <span id="net-chip" class="net-chip hidden"></span>
       <button id="btn-mode" class="pill"></button>
-      <button id="btn-quiz" class="pill">📝</button>
-      <button id="btn-hint" class="pill" title="助手精灵：提示方程式">🧚</button>
+      <!-- 纯 emoji 的按钮对读屏就是"图标按钮 未标注"：aria-label 才说清点下去是什么（H5） -->
+      <button id="btn-quiz" class="pill" aria-label="每日答题"><span aria-hidden="true">📝</span></button>
+      <button id="btn-hint" class="pill" aria-label="助手精灵：提示方程式" title="助手精灵：提示方程式"><span aria-hidden="true">🧚</span></button>
     </div>
   </header>
 
   <div id="stage">
     <main id="bench" class="page on">
-      <div id="room-tabs"></div>
+      <div id="room-tabs" role="tablist" aria-label="实验室房间"></div>
       <div id="banner" class="hidden"></div>
-      <div id="bench-stage" class="drop-zone">
-        <div id="vessel-card" title="点击切换仪器">
+      <div id="bench-stage" class="drop-zone" role="tabpanel" aria-label="实验台面">
+        <!-- 原来是纯 div 挂 onclick：键盘/读屏完全进不来。role=button + tabindex 让它可聚焦，
+             Enter/空格在 js/ui.js 里接了同一个 handler（H5） -->
+        <div id="vessel-card" role="button" tabindex="0" title="点击切换仪器">
           <!-- 图标与液体都由 js/icons.js 现画：液体画在容器轮廓内部，换容器时形状跟着走 -->
-          <div id="vessel-icon"></div>
+          <div id="vessel-icon" aria-hidden="true"></div>
           <div id="vessel-name">烧杯</div>
           <div id="vessel-tier">普通 · 粗产物</div>
         </div>
         <ul id="placed-list"></ul>
-        <canvas id="fx-canvas"></canvas>
+        <!-- 粒子层：纯视觉效果，读屏软件念它只会打断方程播报（H5） -->
+        <canvas id="fx-canvas" aria-hidden="true"></canvas>
         <div id="drop-hint">从下方物质架点选，或拖到台面上投放</div>
       </div>
 
@@ -46,87 +56,103 @@
       </div>
 
       <div id="controls">
-        <div class="ctl-group" id="temp-group">
-          <span class="ctl-lbl">条件</span>
-          <button class="temp-btn on" data-t="room">室温</button>
-          <button class="temp-btn" data-t="heat">加热</button>
-          <button class="temp-btn" data-t="ignite">点燃</button>
-          <button class="temp-btn" data-t="highTemp">高温</button>
+        <!-- 四个温度互斥：radio 组让读屏自己念"已选中，加热"，也带来方向键切换（H5） -->
+        <div class="ctl-group" id="temp-group" role="radiogroup" aria-label="反应条件">
+          <span class="ctl-lbl" aria-hidden="true">条件</span>
+          <button class="temp-btn on" data-t="room" role="radio" aria-checked="true">室温</button>
+          <button class="temp-btn" data-t="heat" role="radio" aria-checked="false">加热</button>
+          <button class="temp-btn" data-t="ignite" role="radio" aria-checked="false">点燃</button>
+          <button class="temp-btn" data-t="highTemp" role="radio" aria-checked="false">高温</button>
         </div>
         <div class="ctl-group">
-          <span class="ctl-lbl">用量</span>
-          <button id="btn-elec" class="temp-btn">⚡电解</button>
-          <select id="sel-mult">
+          <span class="ctl-lbl" aria-hidden="true">用量</span>
+          <button id="btn-elec" class="temp-btn" aria-pressed="false"><span aria-hidden="true">⚡</span>电解</button>
+          <select id="sel-mult" aria-label="批量倍率">
             <option value="1">×1</option><option value="2">×2</option>
             <option value="5">×5</option><option value="10">×10</option>
           </select>
         </div>
       </div>
 
-      <div id="cost-preview"></div>
+      <!-- 投放后这行会重算花费与配平，是玩家最需要"听见"的反馈，所以是 live 区（H5） -->
+      <div id="cost-preview" aria-live="polite"></div>
 
       <div id="actionbar">
-        <label id="ins-wrap" class="hidden"><input type="checkbox" id="chk-ins">实验保险（事故理赔50%）</label>
-        <button id="btn-react">⚗️ 开始反应</button>
+        <label id="ins-wrap" class="hidden"><input type="checkbox" id="chk-ins">实验保险（事故理赔<span data-ins-pct>50%</span>）</label>
+        <button id="btn-react"><span aria-hidden="true">⚗️</span> 开始反应</button>
         <button id="btn-clear" class="ghost">清空</button>
       </div>
     </main>
 
     <!-- 每个底部图标 = 一整页（不再是向上弹出的抽屉）；实验台是它的兄弟页 -->
     <section id="page" class="page">
-      <div id="page-head"><b id="page-title"></b><small id="page-sub"></small></div>
+      <!-- <b> 不是标题：读屏按"跳标题"导航时整页是空的。给它 role=heading 才进得了标题列表（H5） -->
+      <div id="page-head"><b id="page-title" role="heading" aria-level="2"></b><small id="page-sub"></small></div>
       <!-- 页内分段条：一页里按"动作类型"分格，段上的数字=现在有几件事可做 -->
-      <div id="page-segs" class="segbar hidden"></div>
-      <div id="page-body"></div>
+      <div id="page-segs" class="segbar hidden" role="tablist" aria-label="页内分段"></div>
+      <div id="page-body" role="tabpanel" tabindex="-1"></div>
       <!-- 投放后就地给一个回实验台的落点，省掉一次导航点击 -->
       <button id="page-fab" class="hidden"></button>
     </section>
   </div>
 
-  <!-- 角标由 js/ui.js 的 updateNav() 画，数字与分段条同源（panels.js claimCounts/buyableCount） -->
-  <nav id="bottom-nav">
-    <button data-tab="bench" class="on">⚗️<i>实验台</i></button>
-    <button data-tab="bag">🧪<i>物质</i><em class="nav-badge hidden"></em></button>
-    <button data-tab="codex">📚<i>图鉴</i><em class="nav-badge hidden"></em></button>
-    <button data-tab="market">🏪<i>市场</i><em class="nav-badge hidden"></em></button>
-    <button data-tab="tasks">📋<i>任务</i><em class="nav-badge hidden"></em></button>
-    <button data-tab="lab">🏗️<i>建设</i><em class="nav-badge hidden"></em></button>
-    <button data-tab="settings">⚙️<i>设置</i><em class="nav-badge hidden"></em></button>
+  <!-- 角标由 js/ui.js 的 updateNav() 画，数字与分段条同源（panels.js claimCounts/buyableCount）。
+       H5：emoji 用 aria-hidden 包起来——TalkBack 会把 🏪 念成"便利店"，和后面的"市场"重复一遍；
+       当前页用 aria-current="page" 标，读屏才会说"市场，标签页，当前"，而不是只靠一个高亮色。 -->
+  <nav id="bottom-nav" aria-label="主导航">
+    <button data-tab="bench" class="on" aria-current="page"><span aria-hidden="true">⚗️</span><i>实验台</i></button>
+    <button data-tab="bag"><span aria-hidden="true">🧪</span><i>物质</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="codex"><span aria-hidden="true">📚</span><i>图鉴</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="market"><span aria-hidden="true">🏪</span><i>市场</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="tasks"><span aria-hidden="true">📋</span><i>任务</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="lab"><span aria-hidden="true">🏗️</span><i>建设</i><em class="nav-badge hidden"></em></button>
+    <button data-tab="settings"><span aria-hidden="true">⚙️</span><i>设置</i><em class="nav-badge hidden"></em></button>
   </nav>
 
-  <div id="modal-root" class="hidden">
+  <!-- 弹窗是"抢走焦点"的东西：不标 dialog + aria-modal，读屏会一路读出背后的整个页面（H5）。
+       标题由 openModal() 写进 aria-labelledby 指的那个节点。 -->
+  <div id="modal-root" class="hidden" role="dialog" aria-modal="true">
     <div id="modal-card"></div>
   </div>
 
-  <div id="toasts"></div>
-  <div id="drag-ghost" class="hidden"></div>
-  <div id="tutorial-root" class="hidden">
+  <!-- H5：整条吐司栈就是"反馈"本身，原来没有 aria-live ⇒ 升级、事故、领取成功对读屏完全静默。
+       polite（不是 assertive）：事故音效已经在响，别再用打断式播报把玩家吓一跳。 -->
+  <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+  <div id="drag-ghost" class="hidden" aria-hidden="true"></div>
+  <div id="tutorial-root" class="hidden" role="dialog" aria-modal="true" aria-label="新手引导">
     <div id="tutorial-card"></div>
   </div>
 </div>
 
 <div id="boot-root">
   <div id="boot-card">
-    <div class="boot-emoji">🧪</div>
-    <h3>化学实验室：元素纪元</h3>
-    <div id="boot-msg">正在连接服务器…</div>
+    <div class="boot-emoji" aria-hidden="true">🧪</div>
+    <h3 id="boot-h">化学实验室：元素纪元</h3>
+    <!-- 启动过程的每一句（"正在连接服务器…"/"登录已过期"）都在改这里：不标 live 就是一屏静默（H5） -->
+    <div id="boot-msg" role="status" aria-live="polite">正在连接服务器…</div>
+    <div id="boot-detail" class="boot-detail hidden"></div>
     <div id="boot-actions"></div>
     <div class="boot-foot">在线游戏 · 进度实时保存在服务器，登录后可跨设备继续</div>
   </div>
 </div>
 
+<!-- 防沉迷全屏页：由 js/curfew.js 按服务端视图渲染，倒计时以 serverNow 为准（改本机时间无效） -->
+<div id="curfew-root" class="hidden" role="dialog" aria-modal="true" aria-label="休息提醒">
+  <div id="curfew-card"></div>
+</div>
+
 <div id="gate-root" class="hidden">
   <div id="gate-card">
     <div class="gate-head">
-      <div class="gate-emoji">🧪</div>
+      <div class="gate-emoji" aria-hidden="true">🧪</div>
       <h3>化学实验室：元素纪元</h3>
       <p class="gate-slogan">118 种元素 · 143 条配平方程式 · 从电解第一瓢水开始</p>
-      <p class="gate-welcome" id="gate-welcome"></p>
+      <p class="gate-welcome" id="gate-welcome" role="status" aria-live="polite"></p>
     </div>
 
-    <div class="tabs gate-tabs" id="gate-tabs">
-      <button type="button" class="on" data-m="login">登录</button>
-      <button type="button" data-m="reg">注册新账号</button>
+    <div class="tabs gate-tabs" id="gate-tabs" role="tablist" aria-label="登录方式">
+      <button type="button" class="on" data-m="login" role="tab" aria-selected="true">登录</button>
+      <button type="button" data-m="reg" role="tab" aria-selected="false">注册新账号</button>
     </div>
 
     <form id="gate-form" autocomplete="off">
@@ -135,7 +161,7 @@
       <label class="gate-lbl" for="gate-p">密码</label>
       <div class="gate-pw">
         <input class="inp" id="gate-p" type="password" maxlength="64" placeholder="至少 6 位">
-        <button class="gate-eye" id="gate-eye" type="button" title="显示 / 隐藏密码">👁</button>
+        <button class="gate-eye" id="gate-eye" type="button" aria-label="显示 / 隐藏密码" title="显示 / 隐藏密码"><span aria-hidden="true">👁</span></button>
       </div>
       <div class="gate-nick hidden" id="gate-nrow">
         <label class="gate-lbl" for="gate-n">昵称（选填）</label>
@@ -154,27 +180,40 @@
     </form>
 
     <div class="gate-or"><span>或</span></div>
+    <!-- 壳内才有：浏览器里没有 TapTap SDK，显示一个必然失败的按钮只会挨骂 -->
+    <button class="gate-taptap hidden" id="gate-taptap" type="button">🎮 用 TapTap 账号登录</button>
     <button class="gate-guest" id="gate-guest" type="button">🎈 以游客身份进入</button>
     <p class="hint-p" id="gate-tip"></p>
+    <div class="gate-legal">
+      <button type="button" class="legal-link" data-legal="terms">用户协议</button><span>·</span>
+      <button type="button" class="legal-link" data-legal="privacy">隐私政策</button><span>·</span>
+      <em>未成年人仅在周五六日及法定节假日 20:00–21:00 可玩</em>
+    </div>
     <div class="gate-foot"><i class="dot" id="gate-dot"></i><span id="gate-server"></span></div>
   </div>
 </div>
 
-<script src="js/data/elements.js?v=3.9"></script>
-<script src="js/data/compounds.js?v=3.9"></script>
-<script src="js/data/reactions.js?v=3.9"></script>
-<script src="js/data/instruments.js?v=3.9"></script>
-<script src="js/content.js?v=3.9"></script>
-<script src="js/state.js?v=3.9"></script>
-<script src="js/engine.js?v=3.9"></script>
-<script src="js/fx.js?v=3.9"></script>
-<script src="js/sfx.js?v=3.9"></script>
-<script src="js/cloud.js?v=3.9"></script>
-<script src="js/gate.js?v=3.9"></script>
-<script src="js/icons.js?v=3.9"></script>
-<script src="js/ui.js?v=3.9"></script>
-<script src="js/panels.js?v=3.9"></script>
-<script src="js/game.js?v=3.9"></script>
-<script src="js/main.js?v=3.9"></script>
+<script src="js/data/elements.js?v=3.14"></script>
+<script src="js/data/compounds.js?v=3.14"></script>
+<script src="js/data/reactions.js?v=3.14"></script>
+<script src="js/data/instruments.js?v=3.14"></script>
+<!-- 壳内配置注入点：APK 打包时由 gradle 用真实域名覆写此文件（浏览器里它是空的=同源） -->
+<script src="js/app-config.js?v=3.14"></script>
+<!-- 原生桥：必须在 cloud.js 之前，令牌存储与 API base 解析都要问它 -->
+<script src="js/shell.js?v=3.14"></script>
+<script src="js/content.js?v=3.14"></script>
+<script src="js/state.js?v=3.14"></script>
+<script src="js/engine.js?v=3.14"></script>
+<script src="js/fx.js?v=3.14"></script>
+<script src="js/sfx.js?v=3.14"></script>
+<script src="js/cloud.js?v=3.14"></script>
+<script src="js/ads.js?v=3.14"></script>
+<script src="js/curfew.js?v=3.14"></script>
+<script src="js/gate.js?v=3.14"></script>
+<script src="js/icons.js?v=3.14"></script>
+<script src="js/ui.js?v=3.14"></script>
+<script src="js/panels.js?v=3.14"></script>
+<script src="js/game.js?v=3.14"></script>
+<script src="js/main.js?v=3.14"></script>
 </body>
 </html>

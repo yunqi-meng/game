@@ -5,7 +5,7 @@
      市场 = 采购 / 特惠 / 黑市 / 耗材 / 出售 / 挂单（商会订单是委托，搬去【任务·今日】）
      任务 = 今日（签到 + 每日任务 + 商会订单）/ 成就 / 玩法（挑战·沙盒·答题）/ 社交
      建设 = 房间 / 仪器 / 升级
-     设置 = 通用 / 外观 / 账号 / 商店（钻石·充值·月卡）/ 关于（重置存档）
+     设置 = 通用 / 外观 / 账号 / 广告（激励视频与积分兑换，取代原来的钻石商店与充值）/ 关于（重置存档）
    每日签到原先埋在【设置·其他】里，是最高频的动作之一，所以搬到【任务·今日】第一张卡。
    所有操作仍只发意图（CHEM.game.call），数值以服务端整帧回执为准。 */
 (function () {
@@ -27,6 +27,8 @@
   /* 长列表的本地搜索词（纯过滤，不参与结算） */
   var qState = { bag: "", codex: "", market: "", eq: "" };
   var qFocus = "";
+  /* 广告中心的视图缓存：数值只来自服务端 ad.status，adWant=该重新拉，adTimer=冷却倒计时（离开本页即停） */
+  var adView = null, adWant = true, adTimer = null;
 
   /** 版本号不写死：直接读入口 HTML 上那个 ?v=（改前端必顶的同一个令牌），两处不会漂移。 */
   function appVer() {
@@ -64,9 +66,12 @@
     if (!bench || !page) return;
     var changed = (P.tab !== tab);
     P.tab = tab;
-    if (changed) qFocus = "";
+    if (changed) { qFocus = ""; resetPages(); }   // 换页 = 换上下文，上一张列表展开到第几轮不该带过去
     document.querySelectorAll("#bottom-nav button").forEach(function (b) {
-      b.classList.toggle("on", b.dataset.tab === tab);
+      var on = b.dataset.tab === tab;
+      b.classList.toggle("on", on);
+      // 当前页原来只有一个高亮色：读屏玩家问"我在哪一页"是得不到回答的（H5）
+      if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     });
     if (tab === "bench") {
       page.classList.remove("on");
@@ -124,19 +129,53 @@
     var cur = segState[tab];
     box.innerHTML = list.map(function (s) {
       var n = s[2] || 0;
-      return '<button class="seg' + (cur === s[0] ? " on" : "") + '" data-seg="' + s[0] + '">' + s[1] +
-        (n > 0 ? '<b class="pip">' + n + "</b>" : n < 0 ? '<i class="pip dot"></i>' : "") + "</button>";
+      // 分段条就是页内的 tabs：只靠 .on 的高亮，读屏听不出"现在看的是哪一段"（H5）
+      var sel = cur === s[0];
+      return '<button class="seg' + (sel ? " on" : "") + '" role="tab" aria-selected="' + (sel ? "true" : "false") +
+        '" aria-controls="page-body" data-seg="' + s[0] + '">' + s[1] +
+        (n > 0 ? '<b class="pip">' + n + "</b>" : n < 0 ? '<i class="pip dot" aria-hidden="true"></i>' : "") +
+        (n > 0 ? '<span class="sr-only">项可办</span>' : "") + "</button>";
     }).join("");
     box.querySelectorAll("[data-seg]").forEach(function (b) {
       b.onclick = function () {
         if (segState[tab] === b.dataset.seg) return;
         segState[tab] = b.dataset.seg;
         qFocus = "";
+        resetPages();
         P.go(tab);
       };
     });
   }
   P.seg = function (tab) { return segState[tab]; };
+
+  /**
+   * 安卓返回键的第一层：把当前页退回"干净状态"——先收起展开过的长列表（H3 的"更多"），
+   * 再清掉搜索词（玩家输入过东西），最后把分段退回默认段（他切换过）。
+   * 三步都是纯 UI，不发意图、不动结算。
+   * 返回 true 表示这次返回被这一层消化了，调用方（game.js）就不该再回实验台。
+   */
+  P.backStep = function () {
+    var tab = P.tab;
+    if (tab === "bench") return false;
+    var keys = [tab];
+    if (tab === "codex") keys.push("eq");                 // 图鉴页的方程式搜索是另一个输入框
+    if (anyPageOpen(keys)) {                              // 展开过就先收回去：这一步最"就近"
+      keys.forEach(function (k) { resetPages(k); });
+      P.render(tab);
+      return true;
+    }
+    var had = keys.some(function (k) { return !!qState[k]; });
+    if (had) {
+      keys.forEach(function (k) { qState[k] = ""; });
+      qFocus = "";
+      P.render(tab);
+      return true;
+    }
+    var def = PAGES[tab];
+    var first = def && def.segs ? def.segs()[0][0] : null;
+    if (first && segState[tab] !== first) { segState[tab] = first; P.go(tab); return true; }
+    return false;
+  };
 
   /** 台面已有物质时，就地给一个回实验台的落点（省一次导航点击）。 */
   function syncFab() {
@@ -146,7 +185,7 @@
     /* 挑战/沙盒的临时工作台本来就在别的页投放，同样给回台入口 */
     if (P.tab === "bench" || !n) { fab.classList.add("hidden"); return; }
     fab.classList.remove("hidden");
-    fab.textContent = "⚗️ 台面 " + n + " 种 · 回实验台";
+    fab.textContent = "⚗️ 台面 " + n + "/" + E.maxLines() + " 种 · 回实验台";
     fab.onclick = function () { P.go("bench"); };
   }
   P.syncFab = syncFab;
@@ -190,6 +229,56 @@
       b.onclick = function () { P.go(b.dataset.act); };
     });
   }
+  /* ---------- 长列表分页（H3） ----------
+     图鉴一次铺 214 张物质卡、方程式 143 行、沙盒材料柜 213 项：拼字符串、innerHTML 解析、
+     再对每张卡 querySelectorAll 绑一次 onclick，这三段是低端 WebView 首屏里最大的一块固定开销，
+     而玩家一屏只看得到十几张。做法沿用实验台物质架那一套（ui.js 的 QS_MAX）：先切一页，
+     多出来的挂一张"更多"，点一下在原位续展——不弹窗、不换页，人不用重新找位置。
+     展开轮数按"列表 key"记忆（key 的前缀就是搜索框那把 key），换搜索词 / 换分类 / 换分段时作废：
+     结果集都变了还留着上一轮的展开，会把新列表撑得比原来更长，等于分页白做。 */
+  var PAGE_N = 24;
+  var pageOpen = {};
+  function resetPages(prefix) {
+    if (!prefix) { pageOpen = {}; return; }
+    Object.keys(pageOpen).forEach(function (k) { if (k.indexOf(prefix + ":") === 0) delete pageOpen[k]; });
+  }
+  /** 这几把 key 底下有没有列表被展开过——安卓返回键要先把这一层收回去。 */
+  function anyPageOpen(prefixes) {
+    return Object.keys(pageOpen).some(function (k) {
+      return pageOpen[k] > 0 && prefixes.some(function (p) { return k.indexOf(p + ":") === 0; });
+    });
+  }
+  /** 取这一页。list 必须已经排好序（截断按位置，重排会让已看过的条目跳走）。 */
+  function pageSlice(key, list) {
+    var n = PAGE_N * (1 + (pageOpen[key] || 0));
+    return list.length <= n ? { list: list, left: 0 } : { list: list.slice(0, n), left: list.length - n };
+  }
+  /** 网格里的"更多"卡：与物质架那张 qs-more 同款样式。它是 div，键盘按不到（H5 那轮判的就是这个），
+      所以补 role/tabindex 与一句读得出的名字。 */
+  function moreCard(key, left) {
+    return '<div class="item-card qs-more" role="button" tabindex="0" aria-label="还有 ' + left + ' 项，展开下一批"' +
+      ' data-more="' + U.esc(key) + '">' +
+      '<div class="sq">+' + left + '</div><div class="zh">更多</div></div>';
+  }
+  /** 行式列表用整行按钮：一条卡片塞在长列表末尾不好点，也不像"还有东西"。 */
+  function moreRow(key, left) {
+    return '<div class="row more-row"><div class="grow"><b>还有 ' + left + ' 项未显示</b>' +
+      '<small>每次展开 ' + PAGE_N + ' 项，原位续接、不会跳回顶部</small></div>' +
+      '<button class="btn-s" data-more="' + U.esc(key) + '">显示更多</button></div>';
+  }
+  function bindMore(body) {
+    body.querySelectorAll("[data-more]").forEach(function (b) {
+      b.onclick = function () {
+        var k = b.dataset.more;
+        pageOpen[k] = (pageOpen[k] || 0) + 1;
+        P.render();            // P.render 对同一 tab:seg 会保住 scrollTop，续展不弹回顶部
+      };
+      if (b.tagName !== "BUTTON") b.onkeydown = function (e) {
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); b.click(); }
+      };
+    });
+  }
+  P.pageStats = function () { return { n: PAGE_N, open: Object.keys(pageOpen).length }; };
   function bindSearch(body, key) {
     var inp = body.querySelector(".js-search");
     if (!inp) return;
@@ -201,6 +290,7 @@
     inp.oninput = function () {
       qState[key] = inp.value;
       qFocus = key;
+      resetPages(key);         // 关键词变了 = 结果集变了，上一轮的展开必须作废
       clearTimeout(timer);
       timer = setTimeout(function () { P.render(); }, 140);
     };
@@ -235,8 +325,26 @@
     return out.join(" ｜ ");
   }
 
+  /**
+   * "这一帧算过一次的答案"记忆表。角标与统计条这类计算有个共同形状：输入只有当前存档帧 +
+   * 内容版本，而一次导航里同一样东西要被取 4~6 遍（页内分段条、底部角标、页面统计条各一次）。
+   * 帧的判据用对象身份而不是 revision：state.setServer 每落一帧都换一个新 data 对象，
+   * 换帧天然重算，不需要谁记得去比版本号；内容换版不动存档，所以那一路由 invalidateCounts 显式清。
+   */
+  var countsCache = null, countsFrame = null, countsVer = -1;
+  function invalidateCounts() { countsCache = null; countsFrame = null; countsVer = -1; }
+  function contentVer() { return st.contentVersion ? st.contentVersion() : 0; }
+  function memoGet(name, compute) {
+    var cv = contentVer();
+    if (!countsCache || countsFrame !== st.data || countsVer !== cv) {
+      countsCache = {}; countsFrame = st.data; countsVer = cv;
+    }
+    if (!Object.prototype.hasOwnProperty.call(countsCache, name)) countsCache[name] = compute();
+    return countsCache[name];
+  }
   /** 有几件事"现在就能做"——分段数字与底部导航角标都从这里取，两处不会各算一套。 */
-  function claimCounts() {
+  function claimCounts() { return memoGet("claim", computeClaimCounts); }
+  function computeClaimCounts() {
     var d = st.data, c = { daily: 0, orders: 0, sign: 0, ach: 0, node: 0, play: 0 };
     CHEM.DAILY_TASKS.forEach(function (t) {
       if (!d.daily.claimed[t.id] && st.dailyProgress(t) >= t.goal) c.daily++;
@@ -259,7 +367,8 @@
     return c;
   }
   /** 建设页的红点：已达等级线且金币够买的仪器/房间，避免玩家漏掉能推进的东西。 */
-  function buyableCount() {
+  function buyableCount() { return memoGet("buyable", computeBuyable); }
+  function computeBuyable() {
     var d = st.data, n = 0;
     CHEM.ROOMS.forEach(function (r) {
       if (d.rooms.indexOf(r.id) < 0 && d.level >= r.unlockLv && d.coins >= r.cost) n++;
@@ -273,6 +382,7 @@
   }
   P.claimCounts = claimCounts;
   P.buyableCount = buyableCount;
+  P.invalidateCounts = invalidateCounts;
 
   var PAGES = {
     bag: { segs: bagSegs, draw: drawBag },
@@ -280,7 +390,7 @@
     market: { segs: function () { var d = st.data; return [["buy", "采购", 0], ["special", "特惠", (d.market.specials || []).length], ["black", "黑市", 0], ["consume", "耗材", 0], ["sell", "出售", 0], ["listing", "挂单", d.listings.length]]; }, draw: drawMarket },
     tasks: { segs: function () { var c = claimCounts(); return [["today", "今日", c.today], ["ach", "成就", c.ach], ["play", "玩法", 0], ["social", "社交", 0]]; }, draw: drawTasks },
     lab: { segs: function () { var n = buyableCount(); return [["room", "房间", 0], ["instr", "仪器", n], ["upgrade", "升级", 0]]; }, draw: drawLab },
-    settings: { segs: function () { return [["general", "通用", 0], ["appearance", "外观", 0], ["account", "账号", G.guest ? -1 : 0], ["store", "商店", 0], ["about", "关于", 0]]; }, draw: drawSettings }
+    settings: { segs: function () { return [["general", "通用", 0], ["appearance", "外观", 0], ["account", "账号", G.guest ? -1 : 0], ["ad", "广告", 0], ["about", "关于", 0]]; }, draw: drawSettings }
   };
 
   /* ================= 物质（背包 / 工坊） ================= */
@@ -312,6 +422,7 @@
       return hit(q, [id, s.zh, s.formula, s.symbol, s.en]);
     });
     var cap = st.cap(), kinds = Object.keys(st.data.bag).length;
+    var pb = pageSlice("bag:grid", shown);
     var html = statbar([
       ["持有种数", kinds + " / " + cap, kinds >= cap ? "warn" : ""],
       ["总份数", totalUnits()],
@@ -320,23 +431,24 @@
     html += card({
       t: "🧪 我的背包", meta: shown.length + " 种 · 点卡片即投一份",
       body: chips(groups, bagFilter, "bg") + searchBox("bag", "搜索物质名 / 化学式 / 元素符号") +
-        (shown.length ? '<div class="grid">' + shown.map(function (id) {
+        (shown.length ? '<div class="grid">' + pb.list.map(function (id) {
           var s = all[id];
           var total = st.countAll(id);
           return '<div class="item-card" data-id="' + U.esc(id) + '">' +
             (total ? '<i class="cnt">' + total + "</i>" : "") +
             '<div class="sq" style="background:' + U.esc(s.color) + ";color:" + pickTextColor(s.color) + '">' + U.esc(shortFm(s)) + "</div>" +
             '<div class="zh">' + U.esc(s.zh) + '</div><div class="fm">' + U.esc(s.formula || "") + qMark(id) + "</div></div>";
-        }).join("") + "</div>" : (ids.length
+        }).join("") + (pb.left ? moreCard("bag:grid", pb.left) : "") + "</div>" : (ids.length
           ? emptyState({ glyph: "🔍", text: "没有匹配的物质，换个关键词试试。" })
           : emptyState({ glyph: "🫙", text: "背包空空如也。先去【市场】采购原料，或在实验台上合成。", go: "market" }))) +
         '<p class="hint-p">容量上限 ' + cap + " 种（【建设·升级·储物柜扩容】可提高）。品质分档（粗 / 纯 / 高纯）见【物质·提纯工坊】。危险物质请分开存放。</p>"
     });
     body.innerHTML = html;
-    body.querySelectorAll("[data-bg]").forEach(function (b) { b.onclick = function () { bagFilter = b.dataset.bg; P.render(); }; });
+    body.querySelectorAll("[data-bg]").forEach(function (b) { b.onclick = function () { bagFilter = b.dataset.bg; resetPages(); P.render(); }; });
     bindSearch(body, "bag");
     bindEmptyActions(body);
     bindCards(body);
+    bindMore(body);
   }
   function totalUnits() {
     var n = 0, b = st.data.bag;
@@ -407,19 +519,21 @@
     var q = (qState.bag || "").trim().toLowerCase();
     pool.sort(function (a, b) { return ((st.sub(a).z || 999) - (st.sub(b).z || 999)) || (st.sub(a).price - st.sub(b).price); });
     var shown = pool.filter(function (id) { var s = st.sub(id); return hit(q, [id, s.zh, s.formula]); });
+    var psb = pageSlice("bag:sandbox", shown);
     var html = card({
       t: "🌌 沙盒物质柜", meta: "全部物质 · 无限供应",
-      body: searchBox("bag", "在全部物质里搜索") + '<div class="grid">' + shown.map(function (id) {
+      body: searchBox("bag", "在全部物质里搜索") + '<div class="grid">' + psb.list.map(function (id) {
         var s = st.sub(id);
         return '<div class="item-card" data-id="' + U.esc(id) + '"><i class="cnt">∞</i>' +
           '<div class="sq" style="background:' + U.esc(s.color) + ";color:" + pickTextColor(s.color) + '">' + U.esc(shortFm(s)) + "</div>" +
           '<div class="zh">' + U.esc(s.zh) + "</div></div>";
-      }).join("") + "</div>" +
+      }).join("") + (psb.left ? moreCard("bag:sandbox", psb.left) : "") + "</div>" +
         '<p class="hint-p">点击直接投放到沙盒工作台。不产生收益与图鉴进度，可自由验证化学与彩蛋。</p>'
     });
     body.innerHTML = html;
     bindSearch(body, "bag");
     bindCards(body);
+    bindMore(body);
   }
   function bindCards(body) {
     /* 整页化后这一页看不到台面，跨页拖拽没有落点，所以卡片只保留"点一下投放"；
@@ -435,12 +549,26 @@
     var f = s.formula || s.id;
     return f.length > 6 ? s.zh.slice(0, 4) : f;
   }
+  /* H5：物质色是后台可编辑的数据，不能假设它"够深"或"够浅"。
+     原来用 YIQ 亮度 >150 挑黑白（上世纪的启发式），只保证不刺眼、不保证读得出：
+     按 WCAG 相对亮度实测，214 个物质色里有 29 个的符号压在自己的色块上不到 4.5:1。
+     现在两个候选各算一次对比度取高的：白，或近黑的 --sq-ink（深字那档把门槛从
+     L≤0.183 抬到 L≥0.221，中间的死区只剩 4 个色，已随 V13 迁移把它们挪出去）。
+     口径与 test/a11y.js 完全一致，裁判和运行时算的是同一件事。 */
+  var SQ_INK = "#0f1b26";   /* 相对亮度 0.010249：白底卡上的深墨，压在亮物质色上 */
+  var SQ_INK_L = 0.010249;
+  function chan(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+  function relLum(hexStr) {
+    var h = hexStr.slice(1);
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return 0.2126 * chan(parseInt(h.substr(0, 2), 16))
+      + 0.7152 * chan(parseInt(h.substr(2, 2), 16))
+      + 0.0722 * chan(parseInt(h.substr(4, 2), 16));
+  }
   function pickTextColor(hex) {
     if (!/^#[0-9a-f]{3,8}$/i.test(hex || "")) return "#fff";
-    var h = hex.slice(1);
-    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
-    return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#37474f" : "#fff";
+    var L = relLum(hex);
+    return (1.05 / (L + 0.05)) >= ((L + 0.05) / (SQ_INK_L + 0.05)) ? "#fff" : SQ_INK;
   }
   P.pickTextColor = pickTextColor; P.shortFm = shortFm;
 
@@ -466,21 +594,25 @@
       });
     var known = list.filter(function (id) { return d.discovered[id]; });
     var locked = list.filter(function (id) { return !d.discovered[id]; });
+    var pk = pageSlice("codex:known", known), pl = pageSlice("codex:locked", locked);
     var html = statbar([
       ["已发现", got + " / " + total],
       ["完成度", Math.round(got / total * 100) + "%"],
       ["方程式", Object.keys(d.reactionsKnown).length + " / " + (CHEM.REACTIONS || []).length]
     ]);
     html += '<div class="card"><header class="card-hd"><b>✅ 已发现</b><span>' + known.length + " 种</span></header><div class=\"card-bd\">" +
-      (known.length ? '<div class="grid">' + known.map(codexCard).join("") + "</div>" : '<p class="hint-p">还没有发现任何物质——先去实验台合成第一瓶吧。</p>') +
+      (known.length ? '<div class="grid">' + pk.list.map(codexCard).join("") + (pk.left ? moreCard("codex:known", pk.left) : "") + "</div>" : '<p class="hint-p">还没有发现任何物质——先去实验台合成第一瓶吧。</p>') +
       "</div></div>";
     html += '<div class="card"><header class="card-hd"><b>❔ 待发现</b><span>' + locked.length + " 种</span></header><div class=\"card-bd\">" +
       chips(cats, codexCat, "cc") + searchBox("codex", "在图鉴里搜索物质名 / 化学式") +
-      '<div class="grid">' + locked.map(codexCard).join("") + "</div></div></div>";
+      (locked.length ? '<div class="grid">' + pl.list.map(codexCard).join("") + (pl.left ? moreCard("codex:locked", pl.left) : "") + "</div>"
+        : '<p class="hint-p">这一类已经全部发现了。</p>') +
+      "</div></div>";
     html += '<p class="hint-p">收集 118 种元素与二百余种化合物，全部图鉴约 200 天自然毕业节奏。点击任意卡片看详情与今日行情。</p>';
     body.innerHTML = html;
-    body.querySelectorAll("[data-cc]").forEach(function (b) { b.onclick = function () { codexCat = b.dataset.cc; P.render(); }; });
+    body.querySelectorAll("[data-cc]").forEach(function (b) { b.onclick = function () { codexCat = b.dataset.cc; resetPages(); P.render(); }; });
     bindSearch(body, "codex");
+    bindMore(body);
     body.querySelectorAll("[data-sub]").forEach(function (el) { el.onclick = function () { subDetail(el.dataset.sub); }; });
   }
   function codexCard(id) {
@@ -504,6 +636,7 @@
       .filter(function (r) { return hit(q, [r.id, r.eq, r.type, r.phenomenon]); });
     /* 未发现的那些不按关键词过滤：否则输入一个化学式就能靠"命中几条"反推出它还藏着什么反应，等于白送提示 */
     var miss = flt.filter(function (r) { return !d.reactionsKnown[r.id]; });
+    var pg = pageSlice("eq:got", got), pm = pageSlice("eq:miss", miss);
     var html = statbar([
       ["已解锁", knownN + " / " + rs.length],
       ["完成度", Math.round(knownN / Math.max(1, rs.length) * 100) + "%"],
@@ -512,21 +645,22 @@
     html += card({
       t: "🧾 方程式图鉴", meta: flt.length + " 条",
       body: chips(filters, eqFilter, "ef") + searchBox("eq", "在已解锁的方程式里搜索（方程式 / 类型 / 现象）") +
-        got.map(function (r) {
+        pg.list.map(function (r) {
           return '<div class="row eqrow" data-eq="' + r.id + '"><div class="grow"><b class="eqline">' + U.esc(r.eq) + "</b>" +
             "<small>" + U.esc(r.phenomenon) + " · " + U.esc(r.type) + " · " + U.esc(condText(r)) + "</small></div>" + eqTags(r) + "</div>";
-        }).join("") +
+        }).join("") + (pg.left ? moreRow("eq:got", pg.left) : "") +
         (got.length || !q ? "" : '<p class="hint-p">已解锁的方程式里没有匹配项。</p>') +
         (miss.length ? '<div class="card-sub">尚未发现 · ' + miss.length + " 条" + (q ? "（不计入关键词搜索）" : "") + "</div>" +
-          miss.map(function (r) {
+          pm.list.map(function (r) {
             return '<div class="row"><div class="grow"><b>？？？</b><small>尚未发现 —— 多尝试不同的物质组合</small></div>' +
               '<span class="tag lv' + Math.min(4, r.discoverLv > 15 ? 4 : r.discoverLv > 10 ? 3 : r.discoverLv > 5 ? 2 : 1) + '">Lv.' + r.discoverLv + "</span></div>";
-          }).join("") : "") +
+          }).join("") + (pm.left ? moreRow("eq:miss", pm.left) : "") : "") +
         (got.length ? "" : '<p class="hint-p">还没有解锁方程式。做几次实验，第一瓶水就会点亮图鉴。</p>')
     });
     body.innerHTML = html;
-    body.querySelectorAll("[data-ef]").forEach(function (b) { b.onclick = function () { eqFilter = b.dataset.ef; qFocus = "eq"; P.render(); }; });
+    body.querySelectorAll("[data-ef]").forEach(function (b) { b.onclick = function () { eqFilter = b.dataset.ef; qFocus = "eq"; resetPages(); P.render(); }; });
     bindSearch(body, "eq");
+    bindMore(body);
     body.querySelectorAll("[data-eq]").forEach(function (el) {
       el.onclick = function () {
         var r = (CHEM.REACTIONS || []).find(function (x) { return x.id === el.dataset.eq; });
@@ -600,6 +734,7 @@
         which === "sell" ? marketSell() : marketListing());
     bindMarket(body);
     bindSearch(body, "market");
+    bindMore(body);
     bindEmptyActions(body);
   }
   function marketBuy() {
@@ -612,12 +747,13 @@
     });
     var allN = pool.length;
     pool = pool.filter(function (id) { var s = st.sub(id); return hit(q, [id, s.zh, s.formula]); });
-    var rows = pool.map(function (id) {
+    var pp = pageSlice("market:buy", pool);
+    var rows = pp.list.map(function (id) {
       var s = st.sub(id), p = Math.round(st.buyPrice(id) * marketAmt);
       return '<div class="row"><i class="dot" style="background:' + U.esc(s.color) + '"></i>' +
         '<div class="grow"><b>' + U.esc(s.zh) + '</b> <small>' + U.esc(s.formula || "") + " · 持有 " + st.countAll(id) + (s.hazard ? " · ⚠️危险" : "") + "</small></div>" +
         '<span class="price">🪙' + p + '</span><button class="btn-s" data-buy="' + U.esc(id) + '" data-p="' + p + '">买' + marketAmt + "</button></div>";
-    }).join("");
+    }).join("") + (pp.left ? moreRow("market:buy", pp.left) : "");
     return card({
       t: "🛒 采购原料", meta: "生面孔 ×1.2 起步，声望越高越便宜",
       body: '<div class="rowtools"><div class="tabs flat">' + [1, 10, 50].map(function (n) {
@@ -626,7 +762,7 @@
         searchBox("market", "在市场里搜索物质名 / 化学式") +
         (pool.length ? '<div class="rows">' + rows + "</div>"
           : emptyState({ glyph: "🔍", text: allN ? "没有匹配的货，换个关键词试试。" : "市场暂时没有上架的原料。" })) +
-        '<p class="hint-p">等级不够的元素不会上架；镧系·锕系可在【设置·商店】用礼包一次性解锁。列表按化合物层级与价格排序。</p>'
+        '<p class="hint-p">等级不够的元素不会上架；镧系·锕系可在【设置·广告】用看广告攒的积分一次性解锁。列表按化合物层级与价格排序。</p>'
     });
   }
   function marketDeal(kind) {
@@ -676,9 +812,10 @@
         '<button class="btn-s g" data-sellall="' + U.esc(id) + "|" + q + '">全卖</button>' +
         '<button class="btn-s o" data-list="' + U.esc(id) + "|" + q + '">挂单</button></div>');
     });
+    var ps = pageSlice("market:sell", rows);
     return card({
       t: "💰 出售库存", meta: "直售秒到账 ×" + CHEM.SELL_RATE,
-      body: (rows.length ? '<div class="rows">' + rows.join("") + "</div>"
+      body: (rows.length ? '<div class="rows">' + ps.list.join("") + (ps.left ? moreRow("market:sell", ps.left) : "") + "</div>"
         : emptyState({ glyph: "📦", text: "没有可出售的物品。先在实验台上合成物质，或去【采购】买入低买高卖的原料。" })) +
         '<p class="hint-p">首次出售同种物质有 1.5 倍尝鲜奖金；想卖高价走【挂单】，商会 NPC 会在数分钟内竞价。品质越高卖得越贵，见【物质·提纯工坊】。</p>'
     });
@@ -690,7 +827,8 @@
       var left = Math.max(0, Math.ceil((L.mat - Date.now()) / 1000));
       return '<div class="row"><div class="grow"><b>' + U.esc(s.zh) + " ×" + L.n + "</b><small>" + CHEM.QUALITY[L.q].zh +
         " · 挂价 🪙" + L.price + '</small><div class="bar"><i style="width:' + Math.max(4, 100 - Math.round(left / 6)) + '%"></i></div></div>' +
-        "<span>⏳" + left + "s</span></div>";
+        "<span>⏳" + left + "s</span>" +
+        '<button class="btn-s" data-report="' + U.esc(L.id + "|" + L.q) + '">举报</button></div>';
     }).join("");
     return card({
       t: "📦 在挂订单", meta: d.listings.length + " 笔",
@@ -735,6 +873,10 @@
     });
     body.querySelectorAll("[data-list]").forEach(function (b) {
       b.onclick = function () { var p = b.dataset.list.split("|"); openListingModal(p[0], +p[1]); };
+    });
+    body.querySelectorAll("[data-report]").forEach(function (b) {
+      var p = b.dataset.report.split("|");
+      b.onclick = function () { openReportModal("listing", p[0] + "|" + p[1]); };
     });
   }
   function openListingModal(id, q) {
@@ -890,7 +1032,7 @@
           '<button class="btn-s o" id="go-sb">' + (E.sandboxActive ? "沙盒进行中" : "进入沙盒") + "</button></div>"
       }) +
       card({
-        t: "📝 趣味化学题", meta: "答对 🪙" + CHEM.QUIZ_REWARD + " · 可能掉钻石",
+        t: "📝 趣味化学题", meta: "答对 🪙" + CHEM.quizRewardRange() + " · 可能掉钻石",
         body: '<div class="row"><div class="grow"><b>按年级抽题（服务器判题）</b><small>累计答对 ' + d.stats.quizOk + " / " + d.stats.quiz +
           " 题｜答对计入「答对 2 道化学题」每日任务</small></div></div>" +
           '<div class="pick-row">' + ["all", "小学", "初中", "高中", "大学"].map(function (g) {
@@ -958,7 +1100,12 @@
         });
       };
       if (st.data.daily.claimed.__dblCoupon) return fire();
-      U.simAd("看一段小广告，换一张今日双倍券", function () { run("ad.bonus", { kind: 1 }, fire); });
+      // 双倍券同样要经服务器工单：先看一段激励视频换券，到账后才发领取意图
+      U.watchAd("dbl", function (ok) {
+        if (!ok && btn.isConnected) btn.disabled = false;   // 成功时整帧回执会重绘这张卡
+        if (ok) fire();
+      });
+      return;
     };
   }
 
@@ -1157,7 +1304,7 @@
     var d = st.data, mAct = st.monthlyActive();
     if (which === "appearance") return drawSkin(body, d);
     if (which === "account") return drawAccount(body);
-    if (which === "store") return drawStore(body, mAct);
+    if (which === "ad") return drawAds(body, mAct);
     if (which === "about") return drawAbout(body, d);
     var html = statbar([
       ["模式", d.realMode ? "真实" : "简单"],
@@ -1170,7 +1317,7 @@
       body: '<div class="row"><div class="grow"><b>反应真实度：' + (d.realMode ? "真实模式" : "简单模式") + "</b>" +
         "<small>简单模式忽略温度/催化剂等条件，物质正确即可反应；真实模式完整判定，产物与经验一致</small></div>" +
         '<button class="btn-s" id="set-mode">' + (d.realMode ? "切到简单" : "切到真实") + "</button></div>" +
-        '<div class="row"><div class="grow"><b>实验保险</b><small>开启后下一次实验若出事故，理赔 50% 原料价值（实验台也会随危险组合提示）</small></div>' +
+        '<div class="row"><div class="grow"><b>实验保险</b><small>开启后下一次实验若出事故，理赔 ' + CHEM.insurancePct() + " 原料价值（实验台也会随危险组合提示）</small></div>" +
         '<button class="btn-s ' + (d.insured ? "g" : "") + '" id="set-ins">' + (d.insured ? "已开启" : "已关闭") + "</button></div>"
     });
     var sg = d.sign || { last: "", streak: 0 };
@@ -1180,24 +1327,147 @@
         '<input type="range" class="rng" id="vol-sfx" min="0" max="100" value="' + d.volSfx + '"></div>' +
         '<div class="row"><div class="grow"><b>背景音乐</b><small>程序生成的实验室氛围旋律</small></div>' +
         '<button class="btn-s" id="set-mus">' + (d.music ? "已开启" : "已关闭") + "</button>" +
-        '<input type="range" class="rng" id="vol-mus" min="0" max="100" value="' + d.volMus + '"></div>'
+        // 触感与音量无关，也不进存档：换台设备不该带走上一台的振动习惯，所以它是本机偏好（见 sfx.js）
+        '<input type="range" class="rng" id="vol-mus" min="0" max="100" value="' + d.volMus + '"></div>' +
+        '<div class="row"><div class="grow"><b>📳 触感反馈</b><small>合成成功／实验事故／升级时短振一下（10–20ms）；静音时也照振，设备不支持则自动跳过</small></div>' +
+        '<button class="btn-s' + (CHEM.sfx.hapticOn() ? " g" : "") + '" id="set-hap">' + (CHEM.sfx.hapticOn() ? "已开启" : "已关闭") + "</button></div>"
     });
     html += card({
       t: "📤 分享与其他", meta: "签到本周期 " + signCycle(sg),
       body: '<div class="row"><div class="grow"><b>📣 分享战绩</b><small>复制一句战绩分享给同学（已发现种数由服务器统计）</small></div><button class="btn-s" id="set-share">分享</button></div>' +
         '<div class="row"><div class="grow"><b>每日签到</b><small>签到已搬到【任务·今日】，那里还能看到连续 7 天的礼包进度</small></div><button class="btn-s" data-goto="tasks">去签到</button></div>' +
-        '<div class="row"><div class="grow"><b>月卡状态</b><small>' + (mAct ? "生效中：每日 💎3+🪙800 补贴、挂单免手续费、提纯免机器费" : "未开通，可在【设置·商店】购买") + "</small></div>" +
-        (mAct ? '<span class="tag lv1">VIP</span>' : '<button class="btn-s o" data-goto="store">去商店</button>') + "</div>"
+        '<div class="row"><div class="grow"><b>月卡状态</b><small>' + (mAct ? "生效中：每日 💎3+🪙800 补贴、挂单免手续费、提纯免机器费（到期前可再续 " + monthlyLeft(d) + " 天）" : "未开通：在【设置·广告】用看广告攒的积分兑换 30 天") + "</small></div>" +
+        (mAct ? '<span class="tag lv1">VIP</span>' : '<button class="btn-s o" data-goto="ad">去兑换</button>') + "</div>"
     });
+    html += complianceCard();
+    html += consentCard();
     body.innerHTML = html;
     body.querySelectorAll("[data-goto]").forEach(function (b) {
       b.onclick = function () {
         var t = b.dataset.goto;
-        if (t === "store") { segState.settings = "store"; P.go("settings"); }
+        if (t === "ad") { adWant = true; segState.settings = "ad"; P.go("settings"); }
         else P.go(t);
       };
     });
     bindSoundAndMode(body, d);
+    bindCompliance(body);
+    bindConsent(body);
+  }
+
+  /* 第三方 SDK 授权（只在壳里出现）：同意状态的真源是原生那份 SharedPreferences，
+     这里只负责把它念出来，并提供两个方向的动作——同意（重新问一次）与撤回。
+     撤回入口是法定要求（个保法第十五条：处理目的改变或玩家撤回后，必须能方便地停止处理），
+     "只能同意、要撤回就去清数据"那种写法在提审时会被直接问住。 */
+  var consentView = null;
+  P.consentInvalidate = function () { consentView = null; };
+  function consentCard() {
+    if (!CHEM.shell.inShell() || !CHEM.ad) return "";
+    if (!consentView) {
+      CHEM.ad.consentStatus(function (st) {
+        consentView = st || { consented: false };
+        if (P.tab === "settings" && segState.settings === "general") P.render();
+      });
+      return card({
+        t: "🔐 第三方 SDK 授权", meta: "以壳内记录为准",
+        body: '<div class="row"><div class="grow"><b>正在读取授权状态…</b>' +
+          "<small>激励视频（广告网络）与 TapTap 登录都要先取得你的同意才会启动</small></div></div>"
+      });
+    }
+    var on = consentView.consented === true;
+    return card({
+      t: "🔐 第三方 SDK 授权", meta: on ? "已同意" : "未同意",
+      body: '<div class="row"><div class="grow"><b>' + (on ? "广告与 TapTap 登录已授权" : "尚未授权：激励视频与 TapTap 登录不可用") + "</b>" +
+        "<small>未授权时游戏照常可玩，只是看不到激励视频、也不能用 TapTap 账号一键登录。" +
+        "同意之前壳不会初始化任何第三方 SDK，也不会采集设备标识。</small></div>" +
+        '<button class="btn-s ' + (on ? "" : "o") + '" id="set-consent">' + (on ? "撤回授权" : "去同意") + "</button></div>" +
+        '<p class="hint-p">政策全文在【关于】里，可随时读。</p>'
+    });
+  }
+  function bindConsent(body) {
+    var b = body.querySelector("#set-consent");
+    if (!b) return;
+    b.onclick = function () {
+      if (consentView && consentView.consented === true) {
+        CHEM.ad.revokeConsent(function (ok) {
+          if (!ok) return U.toast("撤回失败：壳没有记下这次操作", "bad");
+          P.consentInvalidate();
+          U.toast("已撤回授权：激励视频与 TapTap 登录停止", "info");
+          if (P.tab === "settings") P.render();
+        });
+        return;
+      }
+      CHEM.ad.askConsent(function () {
+        P.consentInvalidate();
+        U.toast("已同意：可以观看激励视频了", "good");
+        if (P.tab === "settings") P.render();
+      }, function () { /* 在这个入口里点"不同意"就什么也不做，状态仍是未授权 */ });
+    };
+  }
+
+  /* ================= 合规与设备（青少年模式 / 省电模式 / 版本更新） =================
+     青少年模式的时间窗由服务端 curfew 配置决定，这一页只负责"打开/关闭"和把服务器给的窗口
+     原样念出来——客户端不参与判定，所以哪怕有人把这里的文案改掉，闸门照旧生效。 */
+  var cfView = null, cfWant = true;
+  /** 广告到账、后台改配置后都可能让时段变化，给外部一个作废视图的钩子。 */
+  P.curfewInvalidate = function () { cfWant = true; };
+  function complianceCard() {
+    if (cfWant) {
+      cfWant = false;
+      // 读不到时给 false（不是 null）：null 表示"还没问过服务器"，两者在文案上必须分得开
+      CHEM.curfew.refresh(function (v) {
+        cfView = v || false;
+        if (P.tab === "settings" && segState.settings === "general") P.render();
+      });
+    }
+    var minor = !!(cfView && cfView.minor), enforced = cfView && cfView.enforced;
+    var low = CHEM.shell.lowFx();
+    var win = cfView && cfView.window ? cfView.window : null;
+    var html = '<div class="row"><div class="grow"><b>青少年模式</b><small>' +
+      (cfView === null ? "正在从服务器读取状态…"
+        : !cfView ? "暂时读不到服务器的时段配置。开关照旧可用，最终以服务器返回的结果为准。"
+        : "开启后由<b>服务器</b>限定可玩时段" + (win ? "（" + U.esc(curfewWindowText(win)) + "）" : "") +
+          "，时段外实验台会给出倒计时；这是给家长的监护工具，随时可以再关掉。" +
+          (enforced ? "" : "（运营侧的防沉迷总开关当前是关的，所以开启后暂时不会真的拦人）")) +
+      "</small></div><button class='btn-s " + (minor ? "g" : "") + "' id='set-minor'>" + (minor ? "已开启" : "已关闭") + "</button></div>" +
+      '<div class="row"><div class="grow"><b>省电模式</b><small>低端机或想更省电时打开：粒子上限减半、关掉背景光斑，只影响画面，不动任何玩法数值。当前判定：' +
+      (low ? "省电（检测到较弱的设备，或你手动开启过）" : "完整特效") + "</small></div>" +
+      '<button class="btn-s ' + (low ? "g" : "") + '" id="set-lowfx">' + (low ? "已开启" : "已关闭") + "</button></div>";
+    if (CHEM.shell.inShell() && CHEM.game.updateHint) {
+      html += '<div class="row"><div class="grow"><b>检查更新</b><small>服务器建议升级到 ' + U.esc(CHEM.game.updateHint) +
+        "：新版可能带新的反应内容与奖励，旧版不会被强制下线</small></div><button class='btn-s o' id='set-upd'>去更新</button></div>";
+    }
+    return card({ t: "🛡 合规与设备", meta: minor ? "限时段游玩" : "不受限", body: html });
+  }
+  function curfewWindowText(w) {
+    var wd = ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+    return ((w.days || []).map(function (i) { return wd[i] || "第" + i + "天"; }).join("、") || "无") +
+      " " + (w.from || "20:00") + "-" + (w.to || "21:00");
+  }
+  function bindCompliance(body) {
+    var m = body.querySelector("#set-minor");
+    if (m) m.onclick = function () {
+      var on = !(cfView && cfView.minor);
+      CHEM.curfew.setMinor(on, function (j) {
+        if (!j || !j.ok) return U.toast((j && j.msg) || "设置失败，稍后再试", "bad");
+        cfView = j;                        // 用服务端回来的权威视图刷新，不拿本地猜测覆盖
+        P.render();
+        U.toast(on ? "🛡 青少年模式已开启" + (j.allowed ? "" : "：当前不在放行时段") : "青少年模式已关闭", on ? "good" : "");
+        if (!j.allowed) CHEM.curfew.show(j);
+      });
+    };
+    var lf = body.querySelector("#set-lowfx");
+    if (lf) lf.onclick = function () {
+      var on = !CHEM.shell.lowFx();
+      CHEM.shell.setLowFx(on);            // setLowFx 里顺带把 DOM class 与画布分辨率切了
+      P.render();
+      U.toast(on ? "🔋 已开启省电模式：粒子和背景光斑都降档" : "已恢复完整特效", "good");
+    };
+    var up = body.querySelector("#set-upd");
+    if (up) up.onclick = function () {
+      var url = CHEM.game.updateUrl;
+      if (!url) return U.toast("更新地址未配置，请到 TapTap 详情页下载", "bad");
+      try { window.open(url, "_blank"); } catch (e) { U.toast("请从 TapTap 更新到最新版本", ""); }
+    };
   }
   function bindSoundAndMode(body, d) {
     body.querySelector("#set-mus").onclick = function () {
@@ -1208,8 +1478,32 @@
     };
     body.querySelector("#vol-sfx").oninput = function (ev) { st.data.volSfx = +ev.target.value; CHEM.sfx.play("click"); };
     body.querySelector("#vol-sfx").onchange = function (ev) { run("settings", { volSfx: +ev.target.value }); };
-    body.querySelector("#vol-mus").oninput = function (ev) { st.data.volMus = +ev.target.value; CHEM.sfx.setMusic(true); };
-    body.querySelector("#vol-mus").onchange = function (ev) { run("settings", { volMus: +ev.target.value }); };
+    /* H4：音量滑条与音乐开关联动。旧写法在这里无条件 setMusic(true)，
+       等于"开关显示已关闭、拉一下滑条就自己响了"——开关不再是开关。
+       现在的口径：开关说了算；但把音量从 0 拉起来的人明显是想听，就顺手把开关一并打开。 */
+    body.querySelector("#vol-mus").oninput = function (ev) {
+      var v = +ev.target.value;
+      st.data.volMus = v;
+      if (v > 0 && !st.data.music) {
+        st.data.music = true;
+        var mb = body.querySelector("#set-mus");
+        if (mb) mb.textContent = "已开启";
+      }
+      CHEM.sfx.setMusic(!!st.data.music);       // 关着就不起乐；开着时幂等确保在播
+    };
+    body.querySelector("#vol-mus").onchange = function (ev) {
+      run("settings", { volMus: +ev.target.value, music: !!st.data.music });   // 一起送，别让滑条把开关落下
+    };
+    /* 触感是本机偏好、不进存档，所以这里不走 run()：改了就地更新按钮，靠页面重绘回来会把人弹出设置页。 */
+    var hap = body.querySelector("#set-hap");
+    if (hap) hap.onclick = function () {
+      var on = !CHEM.sfx.hapticOn();
+      CHEM.sfx.setHaptic(on);
+      hap.textContent = on ? "已开启" : "已关闭";
+      if (on) hap.classList.add("g"); else hap.classList.remove("g");
+      if (on) CHEM.sfx.buzz("success");   // 重新打开时立刻给一下：振不振得动当场就知道，不用等下一次事故
+      U.toast(on ? "📳 触感已开启" : "触感已关闭", "good");
+    };
     body.querySelector("#set-mode").onclick = function () {
       run("settings", { realMode: !d.realMode }, function () { U.toast(!d.realMode ? "已切换到真实模式" : "已切换到简单模式", "good"); });
     };
@@ -1229,59 +1523,159 @@
         var o = d.skins.owned.indexOf(sk[0]) >= 0 || sk[0] === "default";
         return '<div class="row"><span class="skin-prev skin-' + sk[0] + '"></span><div class="grow"><b>' + sk[1] +
           "</b><small>" + sk[2] + "</small></div>" +
-          (d.skins.cur === sk[0] ? '<span class="tag lv1">使用中</span>' : o ? '<button class="btn-s" data-skin="' + sk[0] + '">切换</button>' : '<button class="btn-s o" data-goto="store">💎 购入</button>') + "</div>";
-      }).join("") + '<p class="hint-p">皮肤只改配色令牌，不动任何玩法数值；赛博与复古在钻石商店购入。</p>'
+          (d.skins.cur === sk[0] ? '<span class="tag lv1">使用中</span>' : o ? '<button class="btn-s" data-skin="' + sk[0] + '">切换</button>' : '<button class="btn-s o" data-goto="ad">📺 积分兑换</button>') + "</div>";
+      }).join("") + '<p class="hint-p">皮肤只改配色令牌，不动任何玩法数值；赛博与复古在【设置·广告】用看广告攒的积分兑换。</p>'
     });
     body.querySelectorAll("[data-skin]").forEach(function (b) {
       b.onclick = function () { run("settings", { skin: b.dataset.skin }, function () { U.toast("皮肤已切换", "good"); }); };
     });
     body.querySelectorAll("[data-goto]").forEach(function (b) {
-      b.onclick = function () { segState.settings = "store"; P.go("settings"); };
+      b.onclick = function () { adWant = true; segState.settings = "ad"; P.go("settings"); };
     });
   }
-  function drawStore(body, mAct) {
+
+  /* ================= 广告中心（取代钻石商店与充值） =================
+     本页所有数字都来自服务端 ad.status 视图：广告位余额、冷却、积分与兑换目录由服务器算好，
+     客户端只负责画和"播一段广告"。看广告→服务器回调→下次取帧结算，这条链路客户端说了不算。 */
+  function drawAds(body, mAct) {
     var d = st.data;
-    var html = statbar([["钻石", "💎 " + d.diamonds], ["金币", "🪙 " + d.coins], ["月卡", mAct ? "生效中" : "未开通"]]);
+    if (adWant) {
+      adWant = false;
+      G.call("ad.status", {}, function (r) {
+        if (!r || r.ok === false) { U.toast((r && r.msg) || "广告中心暂不可用", "bad"); return; }
+        adView = r;
+        P.render();
+      });
+    }
+    if (!adView) {
+      body.innerHTML = card({
+        t: "📺 广告中心", meta: "看视频换奖励",
+        body: '<div class="ph">正在向服务器读取广告位与积分余额…</div>'
+      });
+      return;
+    }
+    var v = adView;
+    var slots = v.slots || [], unlocks = v.unlocks || [];
+    var html = statbar([
+      ["广告积分", "⭐ " + v.points],
+      ["今日余量", v.leftToday + " / " + v.dailyTotal],
+      ["复活次数", v.revive + " 次", v.revive ? "hot" : ""],
+      ["月卡", mAct ? "生效中" : "未开通"]
+    ]);
+    if (!v.enabled) {
+      body.innerHTML = html + card({
+        t: "📺 广告中心", meta: "暂未开放",
+        body: '<div class="ph">运营侧暂时关闭了激励视频，金币与玩法产出照常，不影响继续实验。</div>'
+      });
+      return;
+    }
+    if (v.locked) {
+      body.innerHTML = html + card({
+        t: "🔒 还没到开放等级", meta: "Lv." + v.minLevel + " 开放",
+        body: '<div class="ph">做出更多方程式就能解锁激励视频奖励。当前 Lv.' + d.level + "。</div>" +
+          '<div class="row"><div class="grow"><b>先去实验台</b><small>做实验、涨图鉴，等级是最快的钥匙</small></div><button class="btn-s" data-act="bench">回实验台</button></div>'
+      });
+      bindEmptyActions(body);
+      return;
+    }
+    var warn = "";
+    if (!v.ready) {
+      warn = card({
+        t: "⚠️ 暂时不能发奖", meta: "运营配置", cls: "danger",
+        body: '<div class="ph">服务器还没有配置激励视频的验签口令，看完广告不会发放奖励，所以本页的按钮先按住了。运营在后台补上口令后即可恢复。</div>'
+      });
+    } else if (v.devMode) {
+      warn = card({
+        t: "🧪 演示环境", meta: "仅本机",
+        body: '<div class="ph">当前是本地演示：广告由一段倒计时动画代替，奖励走服务端的演示通道直接入账。线上环境这条通道会关闭，改由广告网络的服务器回调确认。</div>'
+      });
+    }
+    html += warn;
+    if (v.pending > 0) {
+      html += card({
+        t: "⏳ 待到账", meta: v.pending + " 段",
+        body: '<div class="ph">有 ' + v.pending + " 段观看正在等广告网络回执，回执一到就会自动入账，不用重复点。</div>"
+      });
+    }
+    var canPlay = v.ready;
     html += card({
-      t: "💎 钻石商店", meta: "充值为模拟支付",
-      body: CHEM.DSHOP.map(function (g) {
-        var owned = "";
-        if (g.id === "monthly" && mAct) owned = "生效中，至 " + new Date(d.monthly.until).toLocaleDateString();
-        if (g.id === "elpack" && d.packs.el) owned = "已解锁";
-        if (g.id === "noad" && d.noad) owned = "已移除广告";
-        if (g.id === "hint5") owned = "提示次数：" + d.hints;
-        if (g.id.indexOf("skin_") === 0) owned = d.skins.owned.indexOf(g.id.replace("skin_", "")) >= 0 ? "已拥有" : "";
-        return '<div class="row"><div class="grow"><b>' + U.esc(g.zh) + "</b><small>" + U.esc(g.desc) + (owned ? " · " + owned : "") + "</small></div>" +
-          '<button class="btn-s o" data-ds="' + g.id + '">💎' + g.d + "</button></div>";
-      }).join("")
+      t: "📺 看视频领奖励", meta: "每日上限 " + v.dailyTotal + " 次",
+      body: (slots.length ? slots.map(function (s) {
+        var cd = s.cooldownMs > 0;
+        return '<div class="row"><div class="grow"><b>' + U.esc(s.zh) + "</b><small>" + U.esc(s.desc) +
+          " · 奖励 " + U.esc(s.rewardText) + " · 今日剩 " + s.left + " / " + s.daily + "</small>" +
+          (cd ? '<small class="ad-cd" data-cd="' + s.cooldownMs + '">冷却 ' + Math.ceil(s.cooldownMs / 1000) + "s</small>" : "") +
+          '</div><button class="btn-s ' + (s.ready && canPlay ? "o" : "") + '" data-ad="' + s.kind + '"' +
+          (s.ready && canPlay ? "" : " disabled") + ">📺 观看</button></div>";
+      }).join("") : '<div class="ph">当前没有可看的广告位。</div>') +
+        '<p class="hint-p">每个广告位有每日次数与冷却；奖励在服务器确认你看完之后才入账，中途关掉不发放。</p>'
     });
     html += card({
-      t: "🪙 充值中心（模拟）", meta: "演示环境，不产生真实费用",
-      body: CHEM.RECHARGE.map(function (rc, i) {
-        return '<div class="row"><div class="grow"><b>¥' + rc.c + " 钻石档</b><small>模拟支付：服务器直接入账钻石</small></div>" +
-          '<button class="btn-s g" data-rc="' + i + '" data-rd="' + rc.d + '">充值 💎' + rc.d + "</button></div>";
-      }).join("") + '<p class="hint-p">本作没有真实支付通道；钻石与金币账本都在服务器，客户端改不动。</p>'
+      t: "⭐ 积分兑换", meta: "余额 ⭐" + v.points,
+      body: (unlocks.length ? unlocks.map(function (u) {
+        return '<div class="row"><div class="grow"><b>' + U.esc(u.zh) + "</b><small>" + U.esc(u.desc) +
+          " · " + U.esc(u.rewardText) + (u.once ? " · 限一次" : "") + "</small></div>" +
+          (u.done ? '<span class="tag lv1">已兑换</span>'
+            : '<button class="btn-s ' + (u.affordable ? "g" : "") + '" data-ax="' + u.id + '"' + (canPlay ? "" : " disabled") + ">⭐" + u.cost + "</button>") + "</div>";
+      }).join("") : '<div class="ph">运营侧还没有上架兑换项。</div>') +
+        '<p class="hint-p">每看一段广告得 ' + (v.viewPoints || 1) + " 积分，积分不清零；攒够再换想要的东西。</p>"
     });
     body.innerHTML = html;
-    body.querySelectorAll("[data-ds]").forEach(function (b) {
-      b.onclick = function () { buyDiamondItem(b.dataset.ds); };
+    body.querySelectorAll("[data-ad]").forEach(function (b) {
+      b.onclick = function () { watchFromPanel(b.dataset.ad, b); };
     });
-    body.querySelectorAll("[data-rc]").forEach(function (b) {
+    body.querySelectorAll("[data-ax]").forEach(function (b) {
       b.onclick = function () {
-        var tier = +b.dataset.rc;
-        U.modal("<h3>💳 模拟充值</h3><div class='ph'>确认支付 <b>¥" + CHEM.RECHARGE[tier].c + "</b> 购买 💎" + CHEM.RECHARGE[tier].d +
-          "？（演示环境，不产生真实费用）</div>" +
-          '<button class="ok" id="pay-ok">模拟支付</button><button class="ghost" data-close>取消</button>', {
-            after: function (card2) {
-              card2.querySelector("#pay-ok").onclick = function () {
-                U.closeModal();
-                run("shop.recharge", { tier: tier }, function (r) { U.toast("充值成功：💎" + r.gained + "（余额 " + r.diamonds + "）", "gold"); });
-              };
-            }
-          });
+        run("ad.exchange", { id: b.dataset.ax }, function (r) {
+          if (r && r.view) { adView = r.view; P.render(); }
+          U.toast("已兑换：" + ((r && r.text) || r.zh || "奖励已到账"), "gold");
+        });
       };
     });
+    tickAdCooldown();
   }
+  /** 从广告中心点"观看"：按钮先置灰防重复点击，回来后强制刷新一次余额。 */
+  function watchFromPanel(kind, btn) {
+    if (btn) btn.disabled = true;
+    U.watchAd(kind, function () {
+      adWant = true;
+      P.render();
+    });
+  }
+  /** 冷却倒计时只在本地走秒做展示；真要点的时候服务器还会再判一次。 */
+  function tickAdCooldown() {
+    if (adTimer) return;
+    adTimer = setInterval(function () {
+      if (P.tab !== "settings" || segState.settings !== "ad") { clearInterval(adTimer); adTimer = null; return; }
+      var nodes = (U.$("page-body") || document).querySelectorAll("[data-cd]");
+      if (!nodes.length) { clearInterval(adTimer); adTimer = null; return; }   // 没有冷却要显示就别留着这个计时器
+      var anyLeft = false;
+      nodes.forEach(function (n) {
+        var ms = Math.max(0, (+n.dataset.cd || 0) - 1000);
+        n.dataset.cd = ms;
+        n.textContent = ms > 0 ? "冷却 " + Math.ceil(ms / 1000) + "s" : "冷却结束";
+        if (ms > 0) anyLeft = true;
+      });
+      if (!anyLeft) { clearInterval(adTimer); adTimer = null; adWant = true; P.render(); }
+    }, 1000);
+  }
+  /** 月卡剩余天数（向上取整），未开通为 0。 */
+  function monthlyLeft(d) {
+    var ms = (d.monthly && d.monthly.until) || 0;
+    return ms > Date.now() ? Math.ceil((ms - Date.now()) / 86400000) : 0;
+  }
+  /** 广告视图失效：观看/兑换/服务端到账事件之后都要重新拉一次，避免把旧余额当真的。 */
+  P.adInvalidate = function () {
+    adWant = true;
+    if (G.ready && P.tab === "settings" && segState.settings === "ad") P.render();
+  };
+  /** 其他地方（如 U.watchAd 内部）已经拿到新鲜视图时，直接喂给本页，省一次往返。 */
+  P.adSetView = function (v) {
+    if (!v || v.ok === false) return;
+    adView = v;
+    adWant = false;
+    if (G.ready && P.tab === "settings" && segState.settings === "ad") P.render();
+  };
   function drawAccount(body) {
     var html = "";
     if (!CHEM.cloud.available()) {
@@ -1299,6 +1693,10 @@
           '<input class="inp" id="acc-p" type="password" placeholder="密码（至少6位）" maxlength="64"></div>' +
           '<div class="row"><div class="grow"><b>转正注册</b><small>注册后游客进度会<b>并入新账号</b>并继续，不会丢失；跨设备登录同一账号即可接着玩</small></div>' +
           '<button class="btn-s g" id="acc-reg">转正注册</button><button class="btn-s" id="acc-login">已有账号？登录</button></div>' +
+          (CHEM.shell.hasTapTap()
+            ? '<div class="row"><div class="grow"><b>用 TapTap 账号一键绑定</b><small>由 TapTap 出身份，服务端验签后建档并把当前游客进度并进去；换设备时凭 TapTap 找回，比口令稳</small></div>' +
+              '<button class="btn-s g" id="acc-taptap">绑定</button></div>'
+            : "") +
           '<p class="hint-p">游客档没有口令，浏览器缓存清掉就找不回来了——请尽快转正。</p>'
       });
     } else {
@@ -1317,6 +1715,51 @@
     body.innerHTML = html;
     bindAccount(body);
   }
+  /* ---------- 举报 / 反馈（G2 的客户端那一半） ----------
+     规则一条都不在这里判：类型闭合、对象是否真存在、同一对象只留一条在途、每人每日上限，
+     全在服务器的 ReportService。这一层只负责"给一个能指的对象"——所以只有两类进得来：
+     · listing：【市场·挂单】里那一行，ref 用「物品编号|品质」，运营能对着订单查；
+     · other：页面上任何有编号的实体（物质条目、反应、题目），必须写一句发生了什么。
+     举报"人"的两类（nickname／behavior）故意不做：当前版本玩家看不到任何别人的昵称或行为
+     ——好友与榜单都是 NPC 表里的行，硬塞一个【举报】按钮只会收到"查不到这位玩家"。 */
+  function openReportModal(kind, ref) {
+    var k = kind === "listing" ? "listing" : "other";
+    var refPh = function () {
+      return k === "listing" ? "挂单编号，如 H2O|2" : "涉及内容的编号，如 H2O / R045";
+    };
+    U.modal("<h3>🚩 举报 / 反馈</h3>" +
+      "<div class='ph'>这一条只有运营在后台看得到。写清对象与问题即可，不需要写密码，也不要放联系方式。</div>" +
+      chips([["listing", "挂单有问题"], ["other", "内容有问题"]], k, "rk") +
+      '<input class="inp stack" id="rp-ref" maxlength="64" placeholder="' + refPh() + '" value="' + U.esc(ref || "") + '">' +
+      '<textarea class="inp stack" id="rp-why" maxlength="400" rows="3" placeholder="发生了什么（最多 400 字）"></textarea>' +
+      "<button class='ok' id='rp-go'>提交</button><button class='ghost' data-close>取消</button>", {
+        after: function (m) {
+          var kindBtns = m.querySelectorAll("[data-rk]"), refIn = m.querySelector("#rp-ref");
+          kindBtns.forEach(function (b) {
+            b.onclick = function () {
+              // 就地换选中态：重画整张弹窗会把玩家已经敲进去的编号和说明一起清掉
+              k = b.dataset.rk;
+              kindBtns.forEach(function (o) { o.classList.toggle("on", o === b); });
+              refIn.placeholder = refPh();
+            };
+          });
+          var go = m.querySelector("#rp-go");
+          go.onclick = function () {
+            var rf = refIn.value.trim(), why = m.querySelector("#rp-why").value.trim();
+            if (!rf) return U.toast(k === "listing" ? "请写明是哪一张挂单" : "请写明涉及内容的编号", "bad");
+            if (!why) return U.toast("请写一句发生了什么", "bad");
+            go.disabled = true; go.textContent = "提交中…";   // 服务端去重按 (人, 类型, 编号)，但连点两下依然该拦在本地
+            CHEM.cloud.report(k, rf, why, function (j) {
+              go.disabled = false; go.textContent = "提交";
+              if (!j.ok) return U.toast(j.msg || "提交失败", "bad");
+              U.closeModal();
+              var left = Math.max(0, (+j.dailyMax || 0) - (+j.openToday || 0));
+              U.toast("已提交，今天还能举报 " + left + " 条", "good");
+            });
+          };
+        }
+      });
+  }
   function drawAbout(body, d) {
     var c = claimCounts();
     body.innerHTML = card({
@@ -1325,13 +1768,27 @@
         '<div class="kv"><span>结算真源</span><b>服务器（客户端只发意图）</b></div>' +
         '<div class="kv"><span>存档</span><b>服务器云存档，revision 乐观并发</b></div>' +
         '<div class="kv"><span>我的进度</span><b>Lv.' + d.level + " · 发现 " + Object.keys(d.discovered).length + " 种 · 🪙" + d.coins + " · 💎" + d.diamonds + "</b></div>" +
+        (CHEM.shell.inShell() ? '<div class="kv"><span>安装包</span><b>' + U.esc(CHEM.shell.platform()) + " · build " + (CHEM.game.build || "?") + "</b></div>" : "") +
+        '<div class="row"><div class="grow"><b>用户协议 / 隐私政策</b><small>列明我们收什么（账号标识、服务器存档、少量行为埋点）、不收什么（真实姓名、位置、通讯录），以及怎么要求停止埋点</small></div>' +
+        '<button class="btn-s" data-legal="terms">用户协议</button><button class="btn-s" data-legal="privacy">隐私政策</button></div>' +
         '<div class="ph left">以真实化学为底座的在线实验沙盒。数据基于公开化学常识整理，实验请勿在家中模仿。</div>'
+    });
+    body.innerHTML += card({
+      t: "🚩 举报 / 反馈", meta: "限流",
+      body: '<div class="row"><div class="grow"><b>发现问题内容</b><small>挂单、物质条目、反应式或题目有问题，留下编号和一句话；服务器记成一工单，同一问题只留一条在处理，每天有量上限</small></div><button class="btn-s" id="set-report">举报</button></div>' +
+        '<div class="ph left">这里收的是游戏内容的问题。举报其他玩家暂时开不了：这一版里没有玩家之间互相看得见的内容（好友与榜单都是系统角色），等有了再说。</div>'
     });
     body.innerHTML += card({
       t: "🧹 存档", meta: "谨慎", cls: "danger",
       body: '<div class="row"><div class="grow"><b>重置存档</b><small>清空服务器上的全部进度（金币、钻石、图鉴、成就、挂单），无法恢复。当前还有 ' + c.total + " 项奖励未领</small></div>" +
         '<button class="btn-s danger" id="set-reset">重置</button></div>'
     });
+    /* 绑定必须排在最后一次 innerHTML += 之后：给容器再加一次 HTML 会把整棵子树重建，
+       先前挂在按钮上的 onclick 会跟着旧节点一起消失——协议按钮就是这么变成哑的。 */
+    body.querySelectorAll("[data-legal]").forEach(function (b) {
+      b.onclick = function () { CHEM.cloud.showLegal(b.dataset.legal); };
+    });
+    body.querySelector("#set-report").onclick = function () { openReportModal("other", ""); };
     body.querySelector("#set-reset").onclick = function () {
       U.modal("<h3>确认重置？</h3><div class='ph'>服务器上的全部进度、金币、钻石、图鉴都会清空，无法恢复。</div>" +
         '<button class="ok danger" id="do-reset">确认重置</button><button class="ghost" data-close>取消</button>',
@@ -1346,12 +1803,8 @@
         });
     };
   }
-  function buyDiamondItem(id) {
-    run("shop.buy", { id: id }, function () {
-      var msg = { monthly: "月卡已开通 30 天，每日补贴与特权生效", elpack: "镧系·锕系已在市场全量解锁", noad: "激励视频已移除，双倍改为直接领取", hint5: "助手精灵提示次数 +5" }[id];
-      U.toast(msg || "新皮肤已装备", "gold");
-    });
-  }
+  /* 钻石商店与模拟充值已随付费面下线：原来得花钱的东西全部改到【设置·广告】用观看积分兑换，
+     服务端也对 shop.buy / shop.recharge / ad.bonus 三条意图关了回绝，客户端不再有任何入口。 */
 
   /* ---------- 账号动作绑定（游客转正 / 登录 / 改密 / 注销 / 退出） ---------- */
   function bindAccount(body) {
@@ -1377,6 +1830,22 @@
           G.restart();
         });
       };
+      var tt = body.querySelector("#acc-taptap");
+      if (tt) {
+        tt.onclick = function () {
+          tt.disabled = true; tt.textContent = "唤起中…";
+          var back = function () { tt.disabled = false; tt.textContent = "绑定"; };
+          CHEM.shell.taptapTicket(function (e, ticket) {
+            if (e) { back(); return U.toast(e.message || e.msg || "TapTap 授权未完成", "bad"); }
+            CHEM.cloud.taptap(ticket, function (j) {
+              if (!j.ok) { back(); return U.toast(j.msg || "绑定失败", "bad"); }
+              // 换了身份（新 uid）就整页重进：广告视图、榜单缓存、引擎现场都是按旧账号攒的，逐个作废不如重来
+              U.toast("🎮 已绑定 TapTap 账号 " + (j.user || "") + "，游客进度已并入", "gold");
+              G.restart();
+            });
+          });
+        };
+      }
       return;
     }
     if (!body.querySelector("#acc-pass")) return;
@@ -1435,7 +1904,7 @@
     var head = '<div class="tabs">' + [["all", "全部"], ["小学", "小学"], ["初中", "初中"], ["高中", "高中"], ["大学", "大学"]].map(function (g) {
       return '<button data-qg="' + g[0] + '" class="' + (quizGrade === g[0] ? "on" : "") + '">' + g[1] + "</button>";
     }).join("") + "</div>";
-    var html = head + "<h3>📝 趣味化学题（" + U.esc(q.grade) + "）</h3><div class='quiz-q'>" + U.esc(q.q) + "</div>" +
+    var html = head + "<h3>📝 趣味化学题（" + U.esc(q.grade) + "·答对 🪙" + CHEM.quizReward(q.grade) + "）</h3><div class='quiz-q'>" + U.esc(q.q) + "</div>" +
       (q.opts || []).map(function (o, i) { return '<button class="quiz-opt" data-i="' + i + '">' + U.esc(o) + "</button>"; }).join("");
     U.modal(html, {
       after: function (card2) {

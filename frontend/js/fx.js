@@ -1,4 +1,6 @@
-/* Canvas 粒子特效：气泡/烟雾/火焰/发光/沉淀/爆炸 */
+/* Canvas 粒子特效：气泡/烟雾/火焰/发光/沉淀/爆炸
+   低端机（或玩家开了【设置-省电模式】）按 js/shell.js 的判定降档：粒子减半、画布退回 1 倍分辨率、
+   不做屏幕震动。这里只改"画多少"，不动任何玩法数值——省电不该让实验结果变得不一样。 */
 (function () {
   "use strict";
   window.CHEM = window.CHEM || {};
@@ -7,6 +9,10 @@
 
   var cv, ctx, parts = [], raf = null, W = 0, H = 0, DPR = 1;
 
+  function low() { return !!(CHEM.shell && CHEM.shell.lowFx()); }
+  /** 玩家切换省电模式后由设置页调用：分辨率在 resize 里重算，粒子数在下一次 burst 起效。 */
+  FX.applyLowFx = function () { FX.resize(); };
+
   FX.attach = function (canvas) {
     cv = canvas; ctx = canvas.getContext("2d");
     FX.resize();
@@ -14,7 +20,8 @@
   FX.resize = function () {
     if (!cv) return;
     var r = cv.parentElement.getBoundingClientRect();
-    DPR = Math.min(2, window.devicePixelRatio || 1);
+    // 省电时锁 1 倍：挖孔屏手机上 3 倍 DPR 的画布是掉帧的头号来源
+    DPR = low() ? 1 : Math.min(2, window.devicePixelRatio || 1);
     W = r.width; H = r.height;
     cv.width = W * DPR; cv.height = H * DPR;
     cv.style.width = W + "px"; cv.style.height = H + "px";
@@ -25,8 +32,9 @@
 
   FX.burst = function (kinds, color) {
     var cx0 = W / 2;
+    var scale = low() ? 0.5 : 1, cap = low() ? 150 : 420;
     (kinds || []).forEach(function (kind) {
-      var n = kind === "explosion" ? 60 : 26;
+      var n = Math.max(6, Math.round((kind === "explosion" ? 60 : 26) * scale));
       for (var i = 0; i < n; i++) {
         var p = { kind: kind, x: rnd(W * 0.25, W * 0.75), y: H * 0.8, life: 1 };
         if (kind === "bubble") { p.r = rnd(2, 6); p.vy = rnd(-1.6, -0.7); p.vx = rnd(-.3, .3); p.decay = rnd(.006, .013); p.color = "#cfeaff"; }
@@ -43,11 +51,14 @@
         } else { p.r = rnd(2, 5); p.vy = rnd(-.5, .5); p.vx = rnd(-.5, .5); p.decay = .012; p.color = color || "#90caf9"; }
         parts.push(p);
       }
+      // 连着做实验时丢掉最老的粒子：掉帧的根源是堆积，不是单次爆发
+      if (parts.length > cap) parts.splice(0, parts.length - cap);
       FX.start();
     });
   };
 
   FX.shake = function () {
+    if (low()) return;                    // 省电模式不做整屏震动：低端 WebView 上它最像"卡了"
     var el = document.getElementById("bench-stage");
     if (!el) return;
     el.classList.remove("shake"); void el.offsetWidth; el.classList.add("shake");

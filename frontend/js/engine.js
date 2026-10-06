@@ -6,7 +6,13 @@
   var E = {};
   CHEM.engine = E;
 
-  var MAX_LINES = 6;
+  /* 台位上限（单容器同时容纳的物质种数）自 G4 起是 app_config.bench_max_lines，判定在服务端 GameEngine.place。
+     这里不写死 6、也不做本地拦截：客户端只负责"还能放几种"的提示口径，超了由服务端拒并回原因。
+     必须动态读 CHEM：内容包到位前这个数还不存在，写死就会在运营改数后变成假信息。 */
+  E.maxLines = function () {
+    var n = CHEM.BENCH_MAX_LINES;
+    return (typeof n === "number" && n >= 1) ? Math.min(64, Math.floor(n)) : 6;
+  };
   E.benches = null;       /* 持久化实验台（每房间一台），来自服务端存档 benchStates */
   E.tempBench = null;     /* 挑战/沙盒临时台：由 game.js 从服务端回执 bench 字段落地 */
   E.bi = 0;
@@ -47,7 +53,6 @@
 
   /* ---------- 现场只读 ---------- */
   E.lines = function () { return Object.keys(E.cur().placed).length; };
-  E.MAX_LINES = MAX_LINES;
   E.givenLeft = function (id) {
     if (!E.tempBench) return -1;
     var ch = CHEM.state.data.chal;
@@ -75,6 +80,22 @@
     var cat = c.catalyst;
     if (cat && !(b.placed[cat] > 0)) return false;
     if (r.instrument && r.instrument.length && r.instrument.indexOf(b.vessel) === -1) return false;
+    return true;
+  };
+
+  /**
+   * 是否恰好按配比消耗完所有投放物（催化剂除外）——与 GameEngine.consumesExactly 同一条判断。
+   * H1 之前客户端没有这个概念：预览只会念"匹配列表的第一条"，而服务端优先结算刚好消耗干净的那条，
+   * 于是台面上放 2H₂+1O₂ 时界面写着 2H₂+O₂→2H₂O，落账的却是另一条方程式。
+   */
+  E.consumesExactly = function (r, placed) {
+    var cat = E.catalystId(r), rk = Object.keys(r.reactants || {});
+    var pk = Object.keys(placed).filter(function (k) { return k !== cat; });
+    if (pk.length !== rk.length) return false;
+    for (var i = 0; i < rk.length; i++) {
+      var k = rk[i];
+      if ((placed[k] || 0) !== r.reactants[k]) return false;
+    }
     return true;
   };
   function processToReaction(p) {
@@ -108,15 +129,54 @@
     return out;
   };
 
+  /**
+   * 这一次台面会结算哪条方程式（H1：与 GameEngine.pick 逐字对齐的规则）。
+   *
+   * <p>排序不是审美问题：工艺排最前（服务端就是这么定的），其次优先"刚好把台面消耗干净"的组合，
+   * 同类里反应物种数多的赢（2Na+Cl₂ 不该被 Na+Cl 抢走），再按 discoverLv 从小到大。
+   * 客户端以前直接取 matches()[0]，内容与运营一改动顺序，预览就会指着另一条方程式报价——
+   * 玩家按预览投料、按回执对账，两边念不同的方程式就是"成本对不上"那类投诉的来源。
+   */
+  E.pick = function () {
+    var b = E.cur(), rs = E.matches();
+    if (!rs.length) return null;
+    if (rs[0]._process) return rs[0];
+    var exact = rs.filter(function (r) { return E.consumesExactly(r, b.placed); });
+    var cand = exact.length ? exact.slice() : rs.slice();
+    if (exact.length) {
+      cand.sort(function (a, c) {
+        var d = Object.keys(c.reactants || {}).length - Object.keys(a.reactants || {}).length;
+        return d !== 0 ? d : (a.discoverLv || 1) - (c.discoverLv || 1);
+      });
+    } else {
+      cand.sort(function (a, c) { return (a.discoverLv || 1) - (c.discoverLv || 1); });
+    }
+    return cand[0];
+  };
+
+  /* 内容表里查不到的物质按这个价估值（H1）。Java 侧同名常数在 GameEngine.UNKNOWN_PRICE，
+     事故损失与成本预览都必须用它：同一坨原料在预览里算 10、结算时被扣 20，
+     玩家看到的数字就永远对不上账。test/golden/run.js 会静态比这两个源文件的取值是否一致。 */
+  E.UNKNOWN_PRICE = 20;
+
   E.maxMultiplier = function (r) {
     var b = E.cur(), m = Infinity, cap = E.batchCap();
-    for (var k in r.reactants) m = Math.min(m, Math.floor((b.placed[k] || 0) / r.reactants[k]));
+    /* 系数 ≤0 的这一项不参与限流：配比为 0 的反应物根本不消耗，
+       拿它做除法在 JS 里得到 Infinity/NaN、在 Java 里直接是算术异常，两端必须同一个处理。 */
+    for (var k in r.reactants) {
+      var need = r.reactants[k];
+      if (!(need > 0)) continue;
+      m = Math.min(m, Math.floor((b.placed[k] || 0) / need));
+    }
     return Math.max(1, Math.min(isFinite(m) ? m : 1, cap));
   };
   E.costPreview = function (r) {
     var st = CHEM.state, cost = 0, worth = 0;
-    for (var k in r.reactants) cost += (st.sub(k) ? st.sub(k).price : 10) * r.reactants[k];
-    for (var p in r.products) { var s = st.sub(p); worth += (s ? s.price : 0) * r.products[p]; }
+    for (var k in r.reactants) {
+      var s = st.sub(k);
+      cost += (s ? s.price : E.UNKNOWN_PRICE) * r.reactants[k];
+    }
+    for (var p in r.products) { var q = st.sub(p); worth += (q ? q.price : 0) * r.products[p]; }
     return { cost: Math.round(cost), worth: Math.round(worth) };
   };
 

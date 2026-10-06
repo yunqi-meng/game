@@ -29,6 +29,9 @@
     if (!CHEM.ROOMS || !CHEM.ROOMS.length) miss.push("房间库");
     if (miss.length) banner(miss.join("、") + " 未加载，请检查 js/data 内容文件或刷新页面");
     purgeOfflineShell();
-    CHEM.game.boot();
+    CHEM.shell.applyLowFx();
+    /* 壳里先从应用私有目录把令牌捞回 localStorage（异步），再进启动流程。
+       不在壳内时 hydrate 直接回调，浏览器路径一步不加。 */
+    CHEM.shell.store.hydrate(function () { CHEM.game.boot(); });
   });
 })();

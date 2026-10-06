@@ -67,7 +67,9 @@ CHEM.NPCS = [
   { id:"npc4", zh:"柠檬酸女士", emoji:"🍋", focus:"生活化学", discovered: 118, gift:{ id:"CH3COOH", n: 3 } }
 ];
 
-/* 钻石商店（充值为模拟演示，不产生真实交易） */
+/* 【历史种子，不再上架】CHEM.DSHOP / CHEM.RECHARGE 只用来生成 Flyway V2/V3 的种子数据（tools/export-seed.mjs），
+   客户端已不再渲染它们：付费面下线后，钻石礼包/月卡/皮肤全部改到【设置·广告】用激励视频积分兑换，
+   服务端对 shop.buy、shop.recharge 也回了回绝。库里这几行仍在（不能改已应用的迁移），运营要清理请在后台下架。 */
 CHEM.DSHOP = [
   { id:"monthly", zh:"月卡会员", d: 30, desc: "30 天：每日补贴 💎3+🪙800，挂单免手续费，提纯不耗机器。" },
   { id:"elpack", zh:"镧系·锕系礼包", d: 20, desc: "无视等级线，市场直接解锁全部镧系/锕系元素。" },
@@ -99,7 +101,47 @@ CHEM.LAB_UPGRADES = {
   bench:   { zh:"工作台", desc:"合成成本预览更精准、批量倍率上限+5", step:1, baseCost:2500, growth:1.7, max:5 }
 };
 
-CHEM.LEVEL_EXP = function (lv) { return 80 + lv * lv * 25; };  /* 升到 lv+1 所需经验 */
+/* ---------- 结算参数（G4 起真源在 app_config，下面这份只是"后端还没下发时"的基线） ----------
+   这些默认值必须与服务端 Content.Config 的兜底逐字相同：由 test/config-parity.js 与
+   EngineConfigValidatorTest 两头钉住（一头改了另一头就红），否则首帧显示的数字与服务端判定会分裂。 */
+CHEM.LEVEL_EXP_CFG = { base: 80, coef: 25 };       /* 升到 lv+1 需要 base + coef×lv² 经验 */
+CHEM.BENCH_MAX_LINES = 6;                          /* 单个容器同时容纳的物质种数 */
+CHEM.QUIZ_GRADE_MULT = { 小学: 1.0, 初中: 1.0, 高中: 1.2, 大学: 1.5 };
+CHEM.ACCIDENT = {
+  hit_base: 0.5, hit_floor: 0.08, safety_step: 0.1,
+  danger_base: 0.3, danger_floor: 0.05, danger_step: 0.04,
+  loss_base: 0.9, loss_step: 0.12, loss_ratio: 0.5,
+  repair_base: 100, repair_exp_mult: 2, repair_exp_floor: 10,
+  protect_mult: 0.2, insured_refund: 0.5
+};
+
+/* 经验条用的曲线：读 LEVEL_EXP_CFG，且与引擎一样把单次需求兜到 ≥1（0 会让进度条除成 Infinity）。 */
+CHEM.LEVEL_EXP = function (lv) {
+  var c = CHEM.LEVEL_EXP_CFG || {};
+  var base = c.base == null ? 80 : c.base, coef = c.coef == null ? 25 : c.coef;
+  return Math.max(1, base + coef * lv * lv);
+};
+/** 答对一题给多少金币：与服务端 EconomyService 同一个算法（基础值 × 年级倍率后取整）。
+    键在但查不到该年级 = 1.0（运营主动取消加成），与 Content.Config.quizGradeMult 的读法一致。 */
+CHEM.quizReward = function (grade) {
+  var m = CHEM.QUIZ_GRADE_MULT || {};
+  var mult = (m[grade] == null) ? 1.0 : m[grade];
+  return Math.round((CHEM.QUIZ_REWARD || 120) * mult);
+};
+/** 年级倍率不止一档时，入口文案给个区间（"120~180"）而不是某一档的数，免得和实际到账不符。 */
+CHEM.quizRewardRange = function () {
+  var m = CHEM.QUIZ_GRADE_MULT || {}, vals = [];
+  Object.keys(m).forEach(function (k) { vals.push(Math.round((CHEM.QUIZ_REWARD || 120) * (m[k] == null ? 1.0 : m[k]))); });
+  if (!vals.length) return String(CHEM.quizReward("all"));
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  return lo === hi ? String(lo) : lo + "~" + hi;
+};
+/** 保险理赔比例的展示文本：唯一真源是 accident.insured_refund，别再在 UI 里写死 50%。 */
+CHEM.insurancePct = function () {
+  var r = (CHEM.ACCIDENT && CHEM.ACCIDENT.insured_refund != null) ? CHEM.ACCIDENT.insured_refund : 0.5;
+  return Math.round(r * 100) + "%";
+};
+
 CHEM.START_COINS = 5000;
 CHEM.TUTORIAL_COINS = 2000;
 CHEM.QUIZ_REWARD = 120;
@@ -116,26 +158,29 @@ CHEM.DAILY_TASKS = [
   { id:"tQuiz2",   zh:"答对 2 道化学题",      goal:2, reward:500,  key:"quiz" }
 ];
 
+/* 成就：cond 是"达成条件"的描述符（G4 起与 content_item 的 cond 同源，词表见服务端 AchievementRule.Metric）。
+   客户端只用它点亮角标与成就面板，真正的领取判定在服务端；但两边读同一份描述符，
+   运营把阈值从 100 改成 5 时，界面不会还按老阈值亮着。 */
 CHEM.ACHIEVEMENTS = [
-  { id:"aFirst",    zh:"初次合成",     desc:"完成第一次成功实验", reward:300 },
-  { id:"aWater",    zh:"生命之源",     desc:"合成水", reward:500 },
-  { id:"aGold",     zh:"点石成金",     desc:"获得金元素或其化合物", reward:2000 },
-  { id:"aBoom",     zh:"第一次爆炸",   desc:"经历一次实验事故", reward:200 },
-  { id:"aS100",     zh:"百炼成钢",     desc:"累计成功实验 100 次", reward:3000 },
-  { id:"aD20",      zh:"元素探索者",   desc:"图鉴收集 20 种物质", reward:800 },
-  { id:"aD80",      zh:"物质收藏家",   desc:"图鉴收集 80 种物质", reward:4000 },
-  { id:"aD200",     zh:"大化学家",     desc:"图鉴收集 200 种物质", reward:20000 },
-  { id:"aEq30",     zh:"方程式大师",   desc:"解锁 30 个化学方程式", reward:2500 },
-  { id:"aLv10",     zh:"资深研究员",   desc:"等级达到 Lv.10", reward:1500 },
-  { id:"aLv20",     zh:"首席科学家",   desc:"等级达到 Lv.20", reward:8000 },
-  { id:"aRich",     zh:"化学实业家",   desc:"持有金币超过 50000", reward:5000 },
-  { id:"aOrganic",  zh:"有机化学家",   desc:"合成乙酸乙酯", reward:1500 },
-  { id:"aAqua",     zh:"王水溶解者",   desc:"获得王水", reward:2000 },
-  { id:"aQuiz50",   zh:"答题学霸",     desc:"累计答对 50 道题", reward:2000 },
-  { id:"aSnake",    zh:"法老之蛇",     desc:"完成蔗糖浓硫酸脱水实验", reward:1200 },
-  { id:"aRep",      zh:"商会贵宾",     desc:"商会声望达到 50", reward:2000 },
-  { id:"aChallenge",zh:"极限合成",     desc:"完成一次挑战模式", reward:1500 },
-  { id:"aSandbox",  zh:"疯狂科学家",   desc:"沙盒模式中合成 5 种物质", reward:800 }
+  { id:"aFirst",    zh:"初次合成",     desc:"完成第一次成功实验", reward:300, cond:{ metric:"success", op:"ge", value:1 } },
+  { id:"aWater",    zh:"生命之源",     desc:"合成水", reward:500, cond:{ metric:"discoveredSubstance", subject:"H2O" } },
+  { id:"aGold",     zh:"点石成金",     desc:"获得金元素或其化合物", reward:2000, cond:{ metric:"discoveredSubstance", subject:"Au" } },
+  { id:"aBoom",     zh:"第一次爆炸",   desc:"经历一次实验事故", reward:200, cond:{ metric:"boom", op:"ge", value:1 } },
+  { id:"aS100",     zh:"百炼成钢",     desc:"累计成功实验 100 次", reward:3000, cond:{ metric:"success", op:"ge", value:100 } },
+  { id:"aD20",      zh:"元素探索者",   desc:"图鉴收集 20 种物质", reward:800, cond:{ metric:"discoveredCount", op:"ge", value:20 } },
+  { id:"aD80",      zh:"物质收藏家",   desc:"图鉴收集 80 种物质", reward:4000, cond:{ metric:"discoveredCount", op:"ge", value:80 } },
+  { id:"aD200",     zh:"大化学家",     desc:"图鉴收集 200 种物质", reward:20000, cond:{ metric:"discoveredCount", op:"ge", value:200 } },
+  { id:"aEq30",     zh:"方程式大师",   desc:"解锁 30 个化学方程式", reward:2500, cond:{ metric:"reactionsKnownCount", op:"ge", value:30 } },
+  { id:"aLv10",     zh:"资深研究员",   desc:"等级达到 Lv.10", reward:1500, cond:{ metric:"level", op:"ge", value:10 } },
+  { id:"aLv20",     zh:"首席科学家",   desc:"等级达到 Lv.20", reward:8000, cond:{ metric:"level", op:"ge", value:20 } },
+  { id:"aRich",     zh:"化学实业家",   desc:"持有金币超过 50000", reward:5000, cond:{ metric:"coins", op:"ge", value:50000 } },
+  { id:"aOrganic",  zh:"有机化学家",   desc:"合成乙酸乙酯", reward:1500, cond:{ metric:"discoveredSubstance", subject:"CH3COOC2H5" } },
+  { id:"aAqua",     zh:"王水溶解者",   desc:"获得王水", reward:2000, cond:{ metric:"discoveredSubstance", subject:"aqua_regia" } },
+  { id:"aQuiz50",   zh:"答题学霸",     desc:"累计答对 50 道题", reward:2000, cond:{ metric:"quizOk", op:"ge", value:50 } },
+  { id:"aSnake",    zh:"法老之蛇",     desc:"完成蔗糖浓硫酸脱水实验", reward:1200, cond:{ metric:"knownReaction", subject:"R141" } },
+  { id:"aRep",      zh:"商会贵宾",     desc:"商会声望达到 50", reward:2000, cond:{ metric:"reputation", op:"ge", value:50 } },
+  { id:"aChallenge",zh:"极限合成",     desc:"完成一次挑战模式", reward:1500, cond:{ metric:"challenges", op:"ge", value:1 } },
+  { id:"aSandbox",  zh:"疯狂科学家",   desc:"沙盒模式中合成 5 种物质", reward:800, cond:{ metric:"sandbox", op:"ge", value:5 } }
 ];
 
 CHEM.QUIZZES = [

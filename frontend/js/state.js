@@ -33,6 +33,8 @@
       listings: [],
       rep: 0, monthly: { until: 0 }, packs: { el: false },
       noad: false, skins: { owned: ["default"], cur: "default" },
+      /* 广告台账（服务端 AdService 记账，客户端只读）：points=兑换积分，revive=看视频换来的复活次数 */
+      ad: { points: 0, total: 0, revive: 0, day: "", perDay: {}, lastAt: {}, redeemed: {} },
       hints: 0, insured: false,
       friends: {},
       chal: null,
@@ -44,7 +46,14 @@
   S.data = null;
   S.revision = 0;
 
-  /** 服务端整帧落地：唯一的写状态入口。subMap 作废以便内容覆盖后重建。 */
+  /**
+   * 服务端整帧落地：唯一的写状态入口。
+   * 这里**不再**动 subMap——那张表（约 214 个物质对象）只由内容包决定，跟存档无关，
+   * 而 setServer 是"每一帧"都走的路径：一次反应、一次翻页、一次心跳同步都重建一遍，
+   * 等于每点一下屏幕就白造 214 个对象再丢掉（H3）。作废的权责交给内容侧：
+   * 后台换版时 content.js 的 onRefresh（game.js 挂的）会清 subMap，
+   * 而 allSubs 自己还按 CHEM.content.version 兜一道，两个入口都不会留旧表。
+   */
   S.setServer = function (raw, revision) {
     var def = S.defaults();
     var d = Object.assign(def, raw || {});
@@ -54,16 +63,25 @@
     d.skins = Object.assign(S.defaults().skins, raw && raw.skins);
     d.packs = Object.assign(S.defaults().packs, raw && raw.packs);
     d.daily = Object.assign(S.defaults().daily, raw && raw.daily);
+    /* 没看过广告的老存档里服务端可能不带 ad 或给 null，补空壳让页面取用安全 */
+    d.ad = Object.assign(S.defaults().ad, raw && raw.ad);
     d.v = 2;
     S.data = d;
     S.revision = revision || 0;
-    S.subMap = null;
   };
 
   /* ---------- 物质查询 ---------- */
   S.subMap = null;
+  /** 建这张表时所用的内容版本；与 CHEM.content.version 不一致就重建（后台换版走这一道）。 */
+  S.subVersion = -1;
+  S.contentVersion = function () { return (CHEM.content && CHEM.content.version) || 0; };
+  /** 内容侧的显式作废入口：换版时调它，不要再各处手写 subMap = null。 */
+  S.invalidateSubs = function () {
+    S.subMap = null;
+    S.subVersion = -1;
+  };
   S.allSubs = function () {
-    if (S.subMap) return S.subMap;
+    if (S.subMap && S.subVersion === S.contentVersion()) return S.subMap;
     var m = {};
     (CHEM.ELEMENTS || []).forEach(function (e) {
       m[e.id] = { kind: "element", id: e.id, zh: e.zh, en: e.en, symbol: e.symbol, formula: e.symbol, level: 0, z: e.z,
@@ -80,6 +98,7 @@
         color: "#78909c", hazard: false, elements: [], price: c.price, desc: c.desc, uses: "实验耗材" };
     });
     S.subMap = m;
+    S.subVersion = S.contentVersion();
     return m;
   };
   S.sub = function (id) { return S.allSubs()[id]; };
@@ -111,10 +130,16 @@
     if (!S.data.firstBonusTaken[id]) p *= CHEM.FIRST_SELL_BONUS;
     return Math.max(1, Math.round(p));
   };
+  /**
+   * 发现奖金预览（展示用；发钱在服务端）。规则与 GameEngine.discoverBonus 逐字对齐（H1）：
+   * 单质/耗材（level&lt;1）没有"新奇感溢价"，定额 50、反应奖金折半 25；化合物按 level 档区间 + 物质 id 哈希取值。
+   * 这条以前少一段：Java 的 onDiscover 有"单质定额"这一档，而 eqBonus 那条路没有，
+   * 同一种物质在两个入口值不同的金币——对表之后统一收进本方法，两端各自只剩一份。
+   */
   S.discoverBonus = function (id, forReaction) {
     var s = S.sub(id); if (!s) return 0;
-    var lv = s.level || 1;
-    var r = CHEM.DISCOVER_BONUS[lv] || CHEM.DISCOVER_BONUS[1];
+    if (!(s.level >= 1)) return forReaction ? 25 : 50;
+    var r = CHEM.DISCOVER_BONUS[s.level] || CHEM.DISCOVER_BONUS[1];
     var v = r[0] + (r[1] - r[0]) * Math.abs(hash(id));
     v = Math.round(v / 10) * 10;
     return forReaction ? Math.round(v * 0.5) : v;
@@ -122,31 +147,51 @@
 
   /* ---------- 进度展示（只读） ---------- */
   S.dailyProgress = function (task) { return Math.min(task.goal, S.data.daily.counters[task.key] || 0); };
+
+  /* ---------- 成就达成（只用来点亮角标，判定与发放在服务端） ----------
+     G4 之前这里是第二份 19 路 id switch：运营在后台把阈值从 100 改成 5，界面仍按老数字亮着，
+     而"这条成就按什么算"在仓库里也就有了两个答案。现在两边读同一份 cond 描述符，
+     指标名与服务端 AchievementRule.Metric 逐字对齐；服务端加了新指标而这里没跟上，
+     后果只是那条成就的角标不亮（钱仍由服务端算），不会出现"界面说达成了、服务端不发货"。 */
+  function countTrue(o) { var n = 0; for (var k in o) if (o[k] === true) n++; return n; }
+  var ACH_NUM = {
+    success: function (d) { return d.stats.success; },
+    boom: function (d) { return d.stats.boom; },
+    quiz: function (d) { return d.stats.quiz; },
+    quizOk: function (d) { return d.stats.quizOk; },
+    trades: function (d) { return d.stats.trades; },
+    sold: function (d) { return d.stats.sold; },
+    challenges: function (d) { return d.stats.challenges; },
+    sandbox: function (d) { return d.stats.sandbox; },
+    visits: function (d) { return d.stats.visits; },
+    discoveredCount: function (d) { return Object.keys(d.discovered).length; },
+    reactionsKnownCount: function (d) { return Object.keys(d.reactionsKnown).length; },
+    level: function (d) { return d.level; },
+    coins: function (d) { return d.coins; },
+    reputation: function (d) { return d.rep; },
+    equipmentCount: function (d) { return countTrue(d.equipment || {}); },
+    roomCount: function (d) { return (d.rooms || []).length; },
+    friendCount: function (d) { return Object.keys(d.friends || {}).length; },
+    successToday: function (d) { return (d.daily.counters || {}).success || 0; },
+    discoverToday: function (d) { return (d.daily.counters || {}).discover || 0; },
+    tradeToday: function (d) { return (d.daily.counters || {}).trade || 0; },
+    quizToday: function (d) { return (d.daily.counters || {}).quiz || 0; }
+  };
   S.achDone = function (a) {
-    var d = S.data;
-    var disc = Object.keys(d.discovered).length;
-    switch (a.id) {
-      case "aFirst": return d.stats.success >= 1;
-      case "aWater": return !!d.discovered.H2O;
-      case "aGold": return !!d.discovered.Au;
-      case "aBoom": return d.stats.boom >= 1;
-      case "aS100": return d.stats.success >= 100;
-      case "aD20": return disc >= 20;
-      case "aD80": return disc >= 80;
-      case "aD200": return disc >= 200;
-      case "aEq30": return Object.keys(d.reactionsKnown).length >= 30;
-      case "aLv10": return d.level >= 10;
-      case "aLv20": return d.level >= 20;
-      case "aRich": return d.coins >= 50000;
-      case "aOrganic": return !!d.discovered.CH3COOC2H5;
-      case "aAqua": return !!d.discovered.aqua_regia;
-      case "aQuiz50": return d.stats.quizOk >= 50;
-      case "aSnake": return !!d.reactionsKnown["R141"];
-      case "aRep": return d.rep >= 50;
-      case "aChallenge": return d.stats.challenges >= 1;
-      case "aSandbox": return d.stats.sandbox >= 5;
+    var c = a && a.cond, d = S.data;
+    if (!c || !c.metric) return false;                        // 没条件＝引擎也念不出来，一致地判未达成
+    if (c.metric === "discoveredSubstance") return !!c.subject && !!d.discovered[c.subject];
+    if (c.metric === "knownReaction") return !!c.subject && d.reactionsKnown[c.subject] === true;
+    var read = ACH_NUM[c.metric];
+    if (!read || c.value == null) return false;
+    var v = read(d);
+    switch (c.op || "ge") {                                   // 省略 op＝"达到"，与服务端 Op.of(null) 同
+      case "ge": return v >= c.value;
+      case "gt": return v > c.value;
+      case "le": return v <= c.value;
+      case "eq": return v === c.value;
+      default: return false;
     }
-    return false;
   };
 
   /* ---------- 仪器（只读） ---------- */

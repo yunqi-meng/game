@@ -1,4 +1,4 @@
-/* UI 骨架 v3（在线版）：顶栏/房间工作台/拖拽投放/安全弹窗/保险/助手精灵/模拟广告/反应回执/教程。
+/* UI 骨架 v3（在线版）：顶栏/房间工作台/物质架投放/安全弹窗/保险/助手精灵/激励视频观看/反应回执/教程。
    所有交互 = 一个服务端意图（CHEM.game.call）；界面由 game.js 在整帧落地后统一重绘，这里只渲染回执文案。 */
 (function () {
   "use strict";
@@ -65,7 +65,7 @@
   function askHint() {
     var d = st.data;
     var src = d.hints > 0 ? "助手精灵次数 ×" + d.hints : "🪙300";
-    U.modal("<h3>🧚 助手精灵</h3><div class='ph'>精灵会从你尚未发现的方程式中随机揭示一条（当前消耗：" + src + "）。也可在设置页用钻石购买次数。</div>" +
+    U.modal("<h3>🧚 助手精灵</h3><div class='ph'>精灵会从你尚未发现的方程式中随机揭示一条（当前消耗：" + src + "）。次数不够时，可在【设置·广告】看一段激励视频补充。</div>" +
       '<button class="ok" id="hint-go">请精灵提示</button><button class="ghost" data-close>先不用</button>', {
       after: function (card) {
         card.querySelector("#hint-go").onclick = function () {
@@ -103,42 +103,53 @@
     return res.rid ? findReaction(res.rid) : null;
   }
 
-  /* ---------- 模拟激励广告 ---------- */
-  U.simAd = function (title, cb) {
-    if (st.data.noad) { cb && cb(); return; }
-    var left = 3;
-    U.modal("<h3>📺 广告</h3><div class='ph'>" + U.esc(title || "观看广告即可获得奖励") + "</div>" +
-      "<div class='ad-box'>广告播放中… <b id='ad-n'>" + left + "</b>s<div class='ad-bar'><i id='ad-fill' style='width:0%'></i></div></div>" +
-      '<button class="ghost" id="ad-skip" disabled>跳过（看完后可领取）</button>' +
-      '<button class="ok hidden" id="ad-get">领取奖励</button>', {
-      locked: true,
-      after: function (card) {
-        var t = setInterval(function () {
-          left--;
-          var n = card.querySelector("#ad-n"), f = card.querySelector("#ad-fill");
-          if (!n) { clearInterval(t); return; }
-          n.textContent = Math.max(0, left);
-          f.style.width = ((3 - left) / 3 * 100) + "%";
-          if (left <= 0) {
-            clearInterval(t);
-            card.querySelector("#ad-skip").classList.add("hidden");
-            card.querySelector("#ad-get").classList.remove("hidden");
-            card.querySelector("#ad-get").onclick = function () { U.closeModal(); cb && cb(); };
-            card.querySelector("#ad-skip").onclick = function () { U.closeModal(); };
+  /* ---------- 看一段激励视频换奖励 ----------
+     客户端只负责"播一次广告"这件事，奖励一律由服务端说了算：
+     ad.request 拿工单 → 播放 → 线上等广告网络的服务器回调，演示环境走服务端 dev-mode 自证 → 取帧时结算。 */
+  U.watchAd = function (kind, cb) {
+    var done = cb || function () {};
+    G.call("ad.request", { kind: kind }, function (r) {
+      if (!r.ok) { U.toast(r.msg || "暂时不能观看", "bad"); return done(false); }
+      CHEM.ad.play({
+        ticket: r.ticket, spaceId: r.spaceId, zh: r.zh, amount: r.amount,
+        uid: G.user && (G.user.uid || G.user.id) || 0
+      }, function (p) {
+        if (!p.ok) { U.toast(p.msg || "广告没有播完，奖励不会发放", "bad"); return done(false); }
+        if (r.devMode) {
+          G.call("ad.devGrant", { ticket: r.ticket }, function (k) {
+            if (!k.ok) { U.toast(k.msg || "发放失败", "bad"); return done(false); }
+            G.call("ad.status", {}, function (v) {
+              feedAdCenter(v);
+              var hit = pickGrant(v, r.ticket);
+              if (!hit) { U.toast("奖励未能入账，请稍后再试", "bad"); return done(false); }
+              U.toast("🎁 " + r.zh + " 已到账：" + (hit.text || r.rewardText), "gold");
+              done(true, hit);
+            });
+          });
+          return;
+        }
+        CHEM.ad.awaitReward(r.ticket, function (ok, hit, v) {
+          feedAdCenter(v);
+          if (!ok) {
+            U.toast("📺 广告已播完，奖励正在到账，稍后自动入账", "good");
+            return done(false);
           }
-        }, 1000);
-        card.querySelector("#ad-skip").onclick = function () {};
-      }
+          U.toast("🎁 " + r.zh + " 已到账：" + hit.text, "gold");
+          done(true, hit);
+        });
+      });
     });
   };
-  /** 服务端记账的广告奖励：kind 0=事故慰问金 1=任务双倍 */
-  U.adBonus = function (kind, cb) {
-    G.call("ad.bonus", { kind: kind }, function (r) {
-      if (!r.ok) return U.toast(r.msg || "奖励不可领取", "bad");
-      U.toast(r.coupon ? "🎟️ 今日双倍券已到账，领取任务/成就奖励时可用" : "已领取 🪙" + r.coins, "gold");
-      cb && cb();
-    });
-  };
+  function pickGrant(view, ticket) {
+    var list = (view && view.granted) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].ticket === ticket) return list[i];
+    return null;
+  }
+  /** 刚拿到的新鲜视图直接喂给广告中心，省得它再问一遍服务器（不在本页时它自己会忽略）。 */
+  function feedAdCenter(view) {
+    var P = CHEM.panels;
+    if (P && P.adSetView && view && view.ok !== false) P.adSetView(view);
+  }
 
   /* ---------- toast ---------- */
   U.toast = function (msg, cls) {
@@ -154,6 +165,10 @@
     opts = opts || {};
     var root = U.$("modal-root"), card = U.$("modal-card");
     card.innerHTML = html;
+    // dialog 已经标在壳上了，但它还没有名字：读屏只会念"对话框"，然后玩家自己猜这是谁。
+    // 标题各弹窗都写在第一个 h3 里，那就拿它当 aria-label，不再给二十个调用点各加一遍参数。
+    var h = card.querySelector("h3");
+    root.setAttribute("aria-label", (h ? h.textContent : "对话框").replace(/\s+/g, " ").trim());
     root.classList.remove("hidden");
     root.onclick = function (e) {
       if (e.target === root && !opts.locked) root.classList.add("hidden");
@@ -163,7 +178,7 @@
     });
     if (opts.after) opts.after(card);
   };
-  U.closeModal = function () { U.$("modal-root").classList.add("hidden"); };
+  U.closeModal = function () { var r = U.$("modal-root"); r.classList.add("hidden"); r.removeAttribute("aria-label"); };
 
   /* ---------- 房间 tabs + 挑战/沙盒横幅 ---------- */
   function renderRoomTabs() {
@@ -178,7 +193,11 @@
     var html = "";
     d.rooms.forEach(function (rid, i) {
       var r = CHEM.ROOMS.find(function (x) { return x.id === rid; }) || { zh: rid };
-      html += '<button class="room-tab' + (i === E.bi ? " on" : "") + '" data-i="' + i + '">' + U.esc(r.zh) + "</button>";
+      var on = i === E.bi;
+      // 读屏软件只会念"标签 第2项"，不会念 .on 这个类：选中态必须写成 aria-selected，
+      // 否则玩家根本不知道自己现在在台的是哪个房间（H5）。
+      html += '<button class="room-tab' + (on ? " on" : "") + '" role="tab" aria-selected="' + (on ? "true" : "false") +
+        '" aria-controls="bench-stage" data-i="' + i + '">' + U.esc(r.zh) + "</button>";
     });
     wrap.innerHTML = html;
     wrap.querySelectorAll(".room-tab").forEach(function (b) {
@@ -195,9 +214,10 @@
       var ch = d.chal;
       var t = st.sub(ch.target);
       el.classList.remove("hidden");
+      var reviveLeft = (d.ad && d.ad.revive) || 0;   // 次数由服务端结算，这里只读来提示"再点要不要先看一段"
       el.innerHTML = "🎯 挑战：合成 <b>" + U.esc(t ? t.zh : ch.target) + "</b>（" + U.esc(ch.reactId) + "）｜步骤 " + ch.steps + "/" + ch.max +
         "｜奖励 🪙" + ch.reward +
-        (ch.failed ? ' <button id="chal-rev">📺 复活 +2步</button>' : "") +
+        (ch.failed ? ' <button id="chal-rev">📺 复活 +2步' + (reviveLeft ? "（已有 " + reviveLeft + " 次）" : "") + "</button>" : "") +
         ' <button id="chal-giveup">放弃</button>';
       if (ch.failed) el.querySelector("#chal-rev").onclick = function () { U.reviveChallenge(); };
       el.querySelector("#chal-giveup").onclick = function () {
@@ -219,6 +239,10 @@
   /* ---------- 工作台 ---------- */
   function bindBench() {
     U.$("vessel-card").onclick = pickVessel;
+    // 它是 role=button 的 div，不是真按钮：键盘玩家按下 Enter/空格原本什么都不会发生（H5）
+    U.$("vessel-card").onkeydown = function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); pickVessel(); }
+    };
     document.querySelectorAll(".temp-btn[data-t]").forEach(function (b) {
       b.onclick = function () {
         if (b.disabled) return;
@@ -227,6 +251,20 @@
         });
       };
     });
+    // 这四个按钮是一组互斥 radio。只给 role 不给方向键，等于把原生 radio 的键盘契约拿了一半
+    // （读屏会说"单选框"然后玩家按左箭头没反应），所以在这里补上同一套转移。
+    U.$("temp-group").onkeydown = function (e) {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      var list = Array.prototype.slice.call(document.querySelectorAll(".temp-btn[data-t]"));
+      var i = list.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      var n = list.length;
+      for (var k = 1; k <= n; k++) {
+        var j = (i + (e.key === "ArrowRight" ? k : n - k)) % n;
+        if (!list[j].disabled) { list[j].focus(); list[j].click(); return; }
+      }
+    };
     U.$("btn-elec").onclick = function () {
       if (!E.canElectrolysis()) return U.toast("需要先购买【电解槽】（建设页）", "bad");
       G.call("bench.electrolysis", { on: !E.cur().electrolysis });
@@ -244,7 +282,7 @@
       var on = this.checked;
       G.call("settings", { insured: on }, function (r) {
         if (!r.ok) return U.toast(r.msg || "设置失败", "bad");
-        if (on) U.toast("已购买实验保险：下一次实验若出事故，理赔 50% 原料价值", "gold");
+        if (on) U.toast("已购买实验保险：下一次实验若出事故，理赔 " + CHEM.insurancePct() + " 原料价值", "gold");
       });
     };
   }
@@ -255,9 +293,12 @@
       var t = x.dataset.t, ok = E.canTemp(t);
       x.disabled = !ok;
       x.classList.toggle("on", b.temp === t);
+      // .on 只是颜色。选中态必须同时写进 aria-checked，读屏才念得出"加热，已选中"（H5）
+      x.setAttribute("aria-checked", b.temp === t ? "true" : "false");
     });
     var eb = U.$("btn-elec");
     eb.classList.toggle("on", !!b.electrolysis);
+    eb.setAttribute("aria-pressed", b.electrolysis ? "true" : "false");
     eb.style.opacity = E.canElectrolysis() ? 1 : 0.4;
     var sm = U.$("sel-mult");
     if (sm) {
@@ -394,17 +435,22 @@
     var danger = E.dangerInfo();
     insWrap.classList.toggle("hidden", !danger || !!E.tempBench);
     U.$("chk-ins").checked = !!st.data.insured;
+    /* 理赔比例写在 accident 配置里，文案跟着它走：后台改了数，界面不会还挂着 50% */
+    insWrap.querySelectorAll("[data-ins-pct]").forEach(function (el) { el.textContent = CHEM.insurancePct(); });
 
-    /* 成本预览：纯本地读操作（真实结算与方程式以服务端回执为准） */
+    /* 成本预览：纯本地读操作（真实结算与方程式以服务端回执为准）
+       但"预告哪条方程式"必须和服务端真正结算的那条同规则，否则界面写的是一式、落账是另一式（H1）。
+       取法与判定都在 engine.js 的 E.pick 里，和 GameEngine.pick 逐字对齐，由 test/golden 两端共判。 */
     var pv = U.$("cost-preview");
     var rs = E.matches();
     if (!Object.keys(b.placed).length) { pv.innerHTML = ""; }
     else if (danger) {
       pv.innerHTML = '<span class="warn">⚠️ 危险混放：' + U.esc(danger.msg) + "</span>";
     } else if (rs.length) {
-      var c = E.costPreview(rs[0]);
-      pv.innerHTML = "匹配反应：" + U.esc(rs[0].eq) + " ｜原料成本 " + c.cost + " → 产物价值 <b>" + c.worth + "</b>" +
-        tagLine(rs[0]);
+      var pk = E.pick() || rs[0];
+      var c = E.costPreview(pk);
+      pv.innerHTML = "匹配反应：" + U.esc(pk.eq) + " ｜原料成本 " + c.cost + " → 产物价值 <b>" + c.worth + "</b>" +
+        tagLine(pk);
     } else {
       var realNoCond = (CHEM.REACTIONS || []).some(function (r) {
         return Object.keys(r.reactants).every(function (k) { return (b.placed[k] || 0) >= r.reactants[k]; })
@@ -476,7 +522,7 @@
   function safetyModal(danger) {
     U.modal("<h3>⚠️ 安全教育提示</h3><div class='ph'>" + U.esc(danger.msg) + "</div>" +
       '<div class="ph">现实中这类操作可能造成严重伤害。游戏里继续实验将有很高概率发生事故（损失原料与金币，安全设施/防护罩可降低损失）。</div>' +
-      '<label class="row"><input type="checkbox" id="ins2"> 购买本次实验保险（理赔 50% 原料价值）</label>' +
+      '<label class="row"><input type="checkbox" id="ins2"> 购买本次实验保险（理赔 ' + CHEM.insurancePct() + " 原料价值）</label>" +
       '<button class="ok" id="safety-go">我已了解风险，继续</button><button class="ghost" data-close>冷静一下，先分离它们</button>', {
       after: function (card) {
         card.querySelector("#ins2").checked = !!st.data.insured;
@@ -526,11 +572,12 @@
         title: "💥 实验事故",
         body: '<div class="ph">' + U.esc(res.msg) + "</div>" +
           "<div class='ph'>复盘：危险物质要分开存放！升级【安全设施】、常备【防护罩】与【实验保险】可大幅减少损失。</div>" +
-          (st.data.chal ? "" : "<div class='ph'>想快速回本？看一段广告领取事故慰问金 🪙500。</div>") +
+          (st.data.chal ? "" : "<div class='ph'>想快速回本？看一段激励视频领取事故慰问金。</div>") +
           (st.data.chal ? "" : '<button class="btn-s o" id="ad-boom">📺 观看广告领取</button>')
       });
       var ab = U.$("modal-card").querySelector("#ad-boom");
-      if (ab) ab.onclick = function () { U.simAd("事故慰问金", function () { U.adBonus(0); }); };
+      // 档位与数量由服务端广告配置决定，这里不写死数字，避免运营调价后文案漂移。
+      if (ab) ab.onclick = function () { U.watchAd("boom"); };
       return;
     }
     var r = ofReceipt(res) || { eq: res.eq || "反应完成", phenomenon: "", type: "", fx: [] };
@@ -669,7 +716,11 @@
   function showGhost(id, ev) {
     var g = U.$("drag-ghost"), s = st.sub(id);
     g.textContent = s ? (s.formula || s.zh).slice(0, 4) : id;
-    g.style.background = (s && s.color) || "#607d8b";
+    var bg = (s && s.color) || "#607d8b";
+    // 底色跟着物质走，字色就必须跟着底色走：氧气/钠这类浅色块的公式
+    // 压在 CSS 里写死的 #fff 上只有 1.2:1，拖动那一下完全读不出是什么。
+    g.style.background = bg;
+    g.style.color = CHEM.panels.pickTextColor(bg);
     g.classList.remove("hidden");
     moveGhost(ev);
   }
@@ -688,7 +739,9 @@
   U.reviveChallenge = function () {
     var ch = st.data.chal;
     if (!ch || !ch.failed) return U.toast("当前没有可复活的挑战", "bad");
-    U.simAd("📺 复活挑战", function () {
+    // 先看视频换一次复活次数，成功后再消耗它——顺序反了会把没拿到的次数扣掉
+    U.watchAd("revive", function (ok) {
+      if (!ok) return;
       G.call("challenge.revive", {}, function (r) {
         if (!r.ok) return U.toast(r.msg || "复活失败", "bad");
         CHEM.sfx.play("levelup");
@@ -788,11 +841,17 @@
   };
 
   /* ---------- 分享 ---------- */
+  /* 走 js/shell.js 的三级降级：原生分享面板 → Web Share → 复制剪贴板。
+     安卓 WebView 里 navigator.share 基本不存在，而 execCommand("copy") 也不稳，
+     所以必须让壳来回答"到底走了哪条路"，文案才敢照着说。 */
   U.share = function (text) {
     var payload = { title: "化学实验室：元素纪元", text: text || "我在《化学实验室：元素纪元》里发现了 " + Object.keys(st.data.discovered).length + " 种物质，来跟我一起玩化学！" };
-    var done = function () { U.toast("分享口令已复制/已发起分享", "good"); };
-    if (navigator.share) { navigator.share(payload).then(done, function () { copy(payload.text); done(); }); }
-    else { copy(payload.text); done(); }
+    var via = function (v) {
+      U.toast(v === "native" ? "已调起系统分享" : v === "web" ? "已发起分享" : "分享内容已复制到剪贴板", "good");
+    };
+    if (CHEM.shell) CHEM.shell.share(payload.title, payload.text, via);
+    else if (navigator.share) navigator.share(payload).then(function () { via("web"); }, function () { copy(payload.text); via("copy"); });
+    else { copy(payload.text); via("copy"); }
     function copy(t) {
       try {
         var ta = document.createElement("textarea");

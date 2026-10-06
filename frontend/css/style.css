@@ -12,8 +12,57 @@
   --card: #ffffff;
   --card-2: #f6f9fd;
   --ink: #1b2b3c;
-  --sub: #6b7c8e;
+  --sub: #5e6d7d;
   --faint: #9aabbd;
+  /* H5：--faint 是给圆点/描边/徽底用的装饰色（对比度 2.05:1，读不出字），
+     小号正文与标签一律走 --muted——同一个色相，按 WCAG 4.5:1 反推出来的那一档。
+     两套值不能合成一套：合了要么装饰变重，要么文字读不动。 */
+  --muted: #576e85;
+  /* H5：小方块徽底（物质卡的"＋N 更多"、拖拽幽灵）上要放**白字**，而 --faint 对白色只有
+     2.35:1——读不出符号。它不能复用 --sub/--muted：那两个是按"深字浅底"反推的，
+     换到赛博皮肤上对白色只剩 3.04。所以单独一档，每套皮肤各自给足 4.5:1。 */
+  --badge-bg: #5e6d7d;
+  --badge-fg: #ffffff;
+  /* H5：白字实心块专用一档。品牌色要够艳才好看（--orange #ef8f14），可白字压上去只有
+     2.44:1；这一档是"同一色相、暗到够 4.5:1"的版本，只给 .btn-s / 角标 / 系统横幅
+     这类"字压在色块上"的地方用。装饰性的边框、粒子、液体照旧用 --blue/--green/…，
+     它们不需要读，硬提亮度只会让整屏发灰。 */
+  --solid-fg: #ffffff;
+  --solid-blue: #1a6ab8;
+  --solid-green: #1d8557;
+  --solid-orange: #a86812;
+  --solid-red: #c2362d;
+  --solid-purple: #7b52d0;
+  /* H5：压在品牌渐变上的字。#btn-react / .seg.on / 启动门 / 防沉迷页都是这一组，
+     所以渐变里**最亮的一档**也必须让字过 4.5:1——原来默认皮的 --g-brand 收尾是
+     #0d7b78（白字 4.63），次级文字 #eaf3ff 只有 4.14，正好卡在门槛下面。
+     把这一档收到 #0a6160（白字 7.26），主色相不变，两层字都过线。 */
+  --solid-dim: #eaf3ff;
+  /* 顶栏是深色渐变（三套皮肤都深），上面的字恒为白；这一档必须和 --solid-fg 分开：
+     赛博皮的实心块走霓虹亮色 + 深字，若顶栏也借用 --solid-fg，顶栏文字会变成黑底黑字。
+     中段 #1a6ec4 → #1763b4：顶栏副标题原来用 opacity:.8 做"弱化"，压在原色上只有 3.68:1，
+     改成真色 --topbar-dim 并把底提暗一档，两者同时成立。 */
+  --topbar-fg: #ffffff;
+  --topbar-dim: #dceaf5;
+  /* 顶栏信息片（金币/钻石那一排）的底。这里刻意写成不透明的实色，而不是过去那种
+     rgba(255,255,255,.15) 的"毛玻璃"：半透明白的读数取决于它压在渐变哪一段上，
+     实测最亮段 #1763b4 混完只剩 4.43:1，:hover 抬到 .26 之后只剩 3.54:1——
+     而裁判读的是 token，混合结果算不出来，这类值只会一路悄悄滑下门槛。
+     实色一块既保住"浮在顶栏上"的层次，也让白字有 11:1 的确定读数。 */
+  --topbar-pill: #0d3c6b;
+  --topbar-pill-hover: #0a2f54;
+  /* 同上，但用在品牌渐变的那几块面上（启动说明条 / 防沉迷卡 / 其中的幽灵按钮）：
+     一律换成实色板。裁判读不出"半透明白 + 底下那条渐变"的混合值，而实测确实有滑下门槛的：
+     默认皮 #boot-actions .ghost 的 rgba(255,255,255,.12) 混到 #1a6ab8 上只剩 4.38:1，
+     复古皮 .boot-detail 的 .10 板把 --solid-dim 压到 4.76:1——都是"看着是余量、其实是欠账"。 */
+  --plate: #10406f;
+  --plate-deep: #0b2e52;
+  /* 金币条／启动门主按钮上的深褐字：压在 --g-gold 上，三套皮共用一档，
+     但金的暗端必须留够亮度（复古皮原来收到 #b5701a，深褐字只有 3.39）。 */
+  --gold-fg: #3d2c07;
+  /* 选中态小徽标（段上的数字）：底是白的，字就必须是深的 */
+  --pip-bg: #ffffff;
+  --pip-fg: #a86812;
 
   --blue: #1e7fe0;
   --blue-deep: #1358a5;
@@ -30,7 +79,7 @@
   /* 柔和底色（标签/徽章用，皮肤各自调透明度） */
   --soft-blue: #e6f1fc;   --fg-blue: #1358a5;
   --soft-green: #e5f6ec;  --fg-green: #1b7a52;
-  --soft-orange: #fdf0dd; --fg-orange: #a8620a;
+  --soft-orange: #fdf0dd; --fg-orange: #9e5c09;
   --soft-red: #fdeceb;    --fg-red: #b4322a;
   --soft-purple: #efeafc; --fg-purple: #5b34a8;
   --soft-teal: #e2f5f4;   --fg-teal: #0d6b68;
@@ -46,11 +95,11 @@
   --scrim: rgba(14, 30, 48, .5);
   --glass: rgba(255, 255, 255, .82);
 
-  /* 渐变 */
-  --g-brand: linear-gradient(135deg, #1358a5, #1e7fe0 55%, #17a2a2);
-  --g-primary: linear-gradient(135deg, #1e7fe0, #17a2a2);
+  /* 渐变（每套皮肤都按"字要读得出"配平：见上面 --solid-fg / --topbar-fg 的注释） */
+  --g-brand: linear-gradient(135deg, #1358a5, #1a6ab8 55%, #0a6160);
+  --g-primary: linear-gradient(135deg, #1a6ab8, #0a6160);
   --g-gold: linear-gradient(135deg, #ffd45c, #ef8f14);
-  --g-topbar: linear-gradient(135deg, #10497f, #1a6ec4 60%, #1897a0);
+  --g-topbar: linear-gradient(135deg, #10497f, #1763b4 60%, #0a5a58);
 
   /* 阴影 */
   --e1: 0 1px 2px rgba(18, 48, 80, .06), 0 2px 6px rgba(18, 48, 80, .06);
@@ -65,6 +114,10 @@
   --r-lg: 22px;
   --r-pill: 999px;
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 22px;
+  /* H5：可点区的兜底高度。苹果与 WCAG 2.2 都要求命中区 ≥44px，
+     而这一屏上原来有六个类只有 27~31px（顶栏 pill、房间页签、条件按钮…）：
+     拇指点偏一次就是"我以为我点了"。宁可让行高变一点，也不留 27px 的目标。 */
+  --tap-min: 44px;
 
   /* 动效 */
   --dur: .22s;
@@ -75,6 +128,78 @@
   --font: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
 }
 
+/* ---------- 1.1 派生色调（F7：兼容旧 WebView）----------
+   color-mix() 要 Chrome 111 / Safari 16.2，而 minSdk 24 的老机器上 WebView 可能停在更老的版本；
+   它一旦被丢掉，"边框没了、阴影没了、台面渐变没了"是整片一起发生的。
+   所以这里把它降级成一层令牌：:root 里放按默认皮肤算出来的实色兜底（老引擎只用这份），
+   @supports 里再用 color-mix 覆盖（现代引擎用的是皮肤变量，换皮肤色调跟着走）。
+   不要在这个块外写 color-mix()——test/validate.js 有一条裁判专门盯这件事。 */
+:root {
+  --mix-bench-55: rgba(207, 220, 234, 0.55);
+  --mix-bench-70: rgba(207, 220, 234, 0.7);
+  --mix-blue-22: rgba(30, 127, 224, 0.22);
+  --mix-blue-22-stage_top: rgb(197, 222, 248);
+  --mix-blue-24: rgba(30, 127, 224, 0.24);
+  --mix-blue-28: rgba(30, 127, 224, 0.28);
+  --mix-blue-30: rgba(30, 127, 224, 0.3);
+  --mix-blue-34: rgba(30, 127, 224, 0.34);
+  --mix-blue-34-line: rgb(155, 195, 235);
+  --mix-blue-35-line: rgb(154, 194, 235);
+  --mix-blue-36: rgba(30, 127, 224, 0.36);
+  --mix-blue-40: rgba(30, 127, 224, 0.4);
+  --mix-blue-42: rgba(30, 127, 224, 0.42);
+  --mix-blue-45: rgba(30, 127, 224, 0.45);
+  --mix-gold-28: rgba(201, 147, 42, 0.28);
+  --mix-gold-35: rgba(201, 147, 42, 0.35);
+  --mix-gold-40: rgba(201, 147, 42, 0.4);
+  --mix-gold-45: rgba(201, 147, 42, 0.45);
+  --mix-gold-55: rgba(201, 147, 42, 0.55);
+  --mix-green-22: rgba(34, 160, 107, 0.22);
+  --mix-green-40: rgba(34, 160, 107, 0.4);
+  --mix-ic-line-42: rgba(27, 43, 60, 0.32);
+  --mix-ink-76: rgba(27, 43, 60, 0.76);
+  --mix-red-22: rgba(224, 69, 60, 0.22);
+  --mix-red-30: rgba(224, 69, 60, 0.3);
+  --mix-red-34: rgba(224, 69, 60, 0.34);
+  --mix-red-36-line: rgb(221, 172, 176);
+  --mix-red-40: rgba(224, 69, 60, 0.4);
+}
+
+/* 现代引擎：用 color-mix 精确跟随皮肤，覆盖上面那份按默认色算的兜底 */
+@supports (color: color-mix(in srgb, red 50%, transparent)) {
+:root {
+  --mix-bench-55: color-mix(in srgb, var(--bench) 55%, transparent);
+  --mix-bench-70: color-mix(in srgb, var(--bench) 70%, transparent);
+  --mix-blue-22: color-mix(in srgb, var(--blue) 22%, transparent);
+  --mix-blue-22-stage_top: color-mix(in srgb, var(--blue) 22%, var(--stage-top));
+  --mix-blue-24: color-mix(in srgb, var(--blue) 24%, transparent);
+  --mix-blue-28: color-mix(in srgb, var(--blue) 28%, transparent);
+  --mix-blue-30: color-mix(in srgb, var(--blue) 30%, transparent);
+  --mix-blue-34: color-mix(in srgb, var(--blue) 34%, transparent);
+  --mix-blue-34-line: color-mix(in srgb, var(--blue) 34%, var(--line));
+  --mix-blue-35-line: color-mix(in srgb, var(--blue) 35%, var(--line));
+  --mix-blue-36: color-mix(in srgb, var(--blue) 36%, transparent);
+  --mix-blue-40: color-mix(in srgb, var(--blue) 40%, transparent);
+  --mix-blue-42: color-mix(in srgb, var(--blue) 42%, transparent);
+  --mix-blue-45: color-mix(in srgb, var(--blue) 45%, transparent);
+  --mix-gold-28: color-mix(in srgb, var(--gold) 28%, transparent);
+  --mix-gold-35: color-mix(in srgb, var(--gold) 35%, transparent);
+  --mix-gold-40: color-mix(in srgb, var(--gold) 40%, transparent);
+  --mix-gold-45: color-mix(in srgb, var(--gold) 45%, transparent);
+  --mix-gold-55: color-mix(in srgb, var(--gold) 55%, transparent);
+  --mix-green-22: color-mix(in srgb, var(--green) 22%, transparent);
+  --mix-green-40: color-mix(in srgb, var(--green) 40%, transparent);
+  --mix-ic-line-42: color-mix(in srgb, var(--ic-line) 42%, transparent);
+  --mix-ink-76: color-mix(in srgb, var(--ink) 76%, transparent);
+  --mix-red-22: color-mix(in srgb, var(--red) 22%, transparent);
+  --mix-red-30: color-mix(in srgb, var(--red) 30%, transparent);
+  --mix-red-34: color-mix(in srgb, var(--red) 34%, transparent);
+  --mix-red-36-line: color-mix(in srgb, var(--red) 36%, var(--line));
+  --mix-red-40: color-mix(in srgb, var(--red) 40%, transparent);
+}
+}
+
+
 /* ---------- 皮肤：赛博纪元 ---------- */
 body[data-skin="cyber"] {
   --bg: #0a1020;
@@ -84,6 +209,32 @@ body[data-skin="cyber"] {
   --ink: #dbe6ff;
   --sub: #8494b8;
   --faint: #5f6f92;
+  /* 深底皮肤里 --faint 本来就是"能当徽底"的那一档（白字 5.03:1），
+     但它是纯装饰色的浅档，读不出小号正文：正文另给 --muted（对面卡底 4.65:1）。 */
+  --muted: #7887a7;
+  --badge-bg: #5f6f92;
+  /* H5：赛博是"亮色块 + 深字"的反过来不成立的皮肤——霓虹亮蓝/琥珀压白字只有 1.67~3.26:1。
+     所以这一皮的实心块保持原色相的高亮度，文字改成近黑（#08111f 对各亮色 5.80~11.33:1）。
+     --g-brand 的第一个色标原本是 #2f6ae0，对深字只有 3.84:1，抬亮到 #4583f5（5.24）。 */
+  --solid-fg: #08111f;
+  --solid-blue: #4b8bff;
+  --solid-green: #34d399;
+  --solid-orange: #fbbf24;
+  --solid-red: #fb7185;
+  --solid-purple: #a78bfa;
+  --solid-dim: #0a1424;
+  --topbar-fg: #ffffff;
+  --topbar-dim: #a9bcd8;
+  --pip-bg: #08111f;
+  --pip-fg: #fbbf24;
+  /* 赛博顶栏本来就深，信息片用比 --card 再亮一档的夜蓝，白字 15.6:1，
+     同时避开"借用默认皮那支海军蓝"导致的整片跑色。 */
+  --topbar-pill: #16233f;
+  --topbar-pill-hover: #1c2d4f;
+  /* 赛博的实心块是"亮色 + 深字"，所以这里的板走反方向：比 --g-brand 更亮一档的蓝，
+     深字（--solid-fg / --solid-dim）在上面 7.3~8.8:1，比原来那层半透明白更确定。 */
+  --plate: #6ea0ff;
+  --plate-deep: #86b1ff;
   --blue: #4b8bff;
   --blue-deep: #2f6ae0;
   --teal: #2dd4bf;
@@ -108,7 +259,7 @@ body[data-skin="cyber"] {
   --bench: #1b2742;
   --scrim: rgba(2, 6, 16, .68);
   --glass: rgba(18, 26, 46, .84);
-  --g-brand: linear-gradient(135deg, #2f6ae0, #4b8bff 50%, #2dd4bf);
+  --g-brand: linear-gradient(135deg, #4583f5, #4b8bff 50%, #2dd4bf);
   --g-primary: linear-gradient(135deg, #4b8bff, #2dd4bf);
   --g-topbar: linear-gradient(135deg, #0f1b3a, #1d3566 60%, #10424a);
   --e1: 0 0 0 1px rgba(120, 170, 255, .07);
@@ -126,8 +277,35 @@ body[data-skin="retro"] {
   --card: #fdf6e8;
   --card-2: #f7ecd8;
   --ink: #43301c;
-  --sub: #8a6a45;
+  --sub: #7e613f;
   --faint: #a98a63;
+  /* 复古皮的旧 --sub（#8a6a45）对羊皮底只有 4.02:1，压不到 4.5；
+     往深一档取 #7e613f（4.64），仍是同一支褐色。 */
+  --muted: #7b6244;
+  --badge-bg: #8a6a45;
+  /* H5：羊皮底上"白字 + 褐色块"是这一皮的正统读法，但亮档褐色（--orange #b5701a）
+     对白只有 3.9:1，所以实心块统一取暗一档：#9c5f12（5.17）/ #5f7a3a（4.85）/ #a33b2a（6.53）。
+     品牌渐变的旧中段 #9a5f22 对白 5.21 够用，可次级文字（--solid-dim #f5e8d2）只有 4.14，
+     于是整条褐梯度往深走一档（#7d4a12 / #4d6330），白字 6.7~7.3、弱化字 5.5，两层都留余量；
+     羊皮金（--g-gold）收尾 #b5701a 对深褐字只有 3.39，抬到 #d99a2b（5.51）。 */
+  --solid-fg: #ffffff;
+  --solid-blue: #9a5f22;
+  --solid-green: #5f7a3a;
+  --solid-orange: #9c5f12;
+  --solid-red: #a33b2a;
+  --solid-purple: #6f4a86;
+  --solid-dim: #f5e8d2;
+  --topbar-fg: #ffffff;
+  --topbar-dim: #f7ecd9;
+  --pip-bg: #fdf6e8;
+  --pip-fg: #9c5f12;
+  /* 复古皮顶栏是褐→橄榄的渐变，信息片取比暗端 #5a3d1c 再沉一档的咖啡实色：
+     白字 12.1:1，读起来仍是"羊皮上烙了一块深褐"，而不是贴了一块蓝。 */
+  --topbar-pill: #4a3116;
+  --topbar-pill-hover: #3b2711;
+  /* 复古皮的板取比 --g-brand 暗端再沉一档的咖啡：白字 12.1、羊皮弱化字（--solid-dim）10.0。 */
+  --plate: #4a3116;
+  --plate-deep: #3b2711;
   --blue: #9a5f22;
   --blue-deep: #71440f;
   --teal: #6b7a3f;
@@ -152,10 +330,10 @@ body[data-skin="retro"] {
   --bench: #d9c39a;
   --scrim: rgba(60, 40, 16, .5);
   --glass: rgba(253, 246, 232, .88);
-  --g-brand: linear-gradient(135deg, #71440f, #9a5f22 55%, #6b7a3f);
-  --g-primary: linear-gradient(135deg, #9a5f22, #6b7a3f);
-  --g-topbar: linear-gradient(135deg, #6b4a22, #9a5f22 60%, #7d6330);
-  --g-gold: linear-gradient(135deg, #e9c46a, #b5701a);
+  --g-brand: linear-gradient(135deg, #5a3410, #7d4a12 55%, #4d6330);
+  --g-primary: linear-gradient(135deg, #7d4a12, #4d6330);
+  --g-topbar: linear-gradient(135deg, #5a3d1c, #7d4a12 60%, #4d6330);
+  --g-gold: linear-gradient(135deg, #e9c46a, #d99a2b);
   --e1: 0 1px 0 rgba(120, 80, 30, .12), 0 2px 5px rgba(120, 80, 30, .10);
 }
 body[data-skin="retro"] { background: var(--bg-deep); }
@@ -170,11 +348,21 @@ body[data-skin="retro"] #modal-card { border-color: var(--line); }
 html, body { margin: 0; height: 100%; background: var(--bg-deep); font-family: var(--font); color: var(--ink); }
 body { transition: background var(--dur-slow) var(--ease); }
 button { font-family: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+/* 连点防护的视觉收口：G.call 发意图时会把发起那颗按钮禁用并挂上 .busy，整帧落地即解。
+   写在这里而不是各按钮类里，是因为新页面还会加按钮——一条全局规则不会漏。 */
+button:disabled { cursor: not-allowed; }
+button.busy { opacity: .42; }
 b, strong { font-weight: 700; }
 .hidden { display: none !important; }
+/* H5：给读屏软件看、不给眼睛看的说明文字（金币/钻石这类只有图标的位置）。
+   不能用 display:none——那等于对读屏也删了；只能裁到 1px 再藏起来。 */
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 
 #app {
-  position: relative; margin: 0 auto; height: 100dvh; max-width: 480px;
+  position: relative; margin: 0 auto; height: 100vh; height: 100dvh; max-width: 480px;
   display: flex; flex-direction: column; background: var(--bg); overflow: hidden;
   box-shadow: var(--e3);
 }
@@ -184,7 +372,7 @@ b, strong { font-weight: 700; }
    用 display 切换而不是抽屉的 translateY 位移，所以不再需要
    hidden{display:flex!important} 那类保留动画空间的黑技巧。 */
 #stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.page { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden; }
+.page { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: none; flex-direction: column; overflow: hidden; }
 .page.on { display: flex; }
 /* 进场动画单独一个类：换页时 JS 会先摘掉再塞回去（中间读一次 offsetWidth 强制回流），
    否则从"物质"切到"市场"这种同容器换页不会有反馈。 */
@@ -199,11 +387,11 @@ b, strong { font-weight: 700; }
   position: relative; z-index: 5; flex: none;
   display: flex; align-items: center; gap: var(--s2);
   padding: calc(8px + env(safe-area-inset-top)) 10px 9px;
-  background: var(--g-topbar); color: #fff;
+  background: var(--g-topbar); color: var(--topbar-fg);
   box-shadow: 0 6px 18px rgba(12, 40, 74, .24);
 }
 #topbar::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none;
+  content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none;
   background: radial-gradient(120% 140% at 12% -30%, rgba(255, 255, 255, .3), transparent 60%);
 }
 .lv-chip { display: flex; align-items: center; gap: 7px; font-size: 12.5px; letter-spacing: .3px; }
@@ -223,25 +411,25 @@ b, strong { font-weight: 700; }
   transition: width var(--dur-slow) var(--ease-out);
 }
 .expbar::after {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: 0; border-radius: inherit; pointer-events: none;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent);
   transform: translateX(-100%); animation: sweep 2.8s var(--ease) infinite;
 }
 .coins {
   margin-left: auto; display: flex; align-items: center; gap: 5px;
   font-size: 12.5px; font-variant-numeric: tabular-nums;
-  background: rgba(255, 255, 255, .16); border: 1px solid rgba(255, 255, 255, .2);
-  padding: 5px 11px; border-radius: var(--r-pill); backdrop-filter: blur(6px);
+  background: var(--topbar-pill); border: 1px solid rgba(255, 255, 255, .2);
+  padding: 5px 11px; border-radius: var(--r-pill);
 }
 .coins b { font-size: 13.5px; }
-.coins .dim { color: rgba(255, 255, 255, .6); margin-left: 7px; }
+.coins .dim { color: var(--topbar-dim); margin-left: 7px; }
 .top-btns { display: flex; gap: 6px; }
 .pill {
-  border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .15); color: #fff;
+  border: 1px solid rgba(255, 255, 255, .20); background: var(--topbar-pill); color: var(--topbar-fg);
   border-radius: var(--r-pill); padding: 5px 11px; font-size: 12px; line-height: 1.2;
   transition: transform var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.pill:hover { background: rgba(255, 255, 255, .26); }
+.pill:hover { background: var(--topbar-pill-hover); }
 .pill:active { transform: scale(.94); }
 
 /* ---------- 4. 工作台（就是一整页：.page，布局交给 .page 规则） ---------- */
@@ -256,17 +444,17 @@ b, strong { font-weight: 700; }
   box-shadow: var(--e1); transition: all var(--dur) var(--ease);
 }
 .room-tab.on {
-  background: var(--g-brand); border-color: transparent; color: #fff; font-weight: 700;
+  background: var(--g-brand); border-color: transparent; color: var(--solid-fg); font-weight: 700;
   box-shadow: 0 4px 14px rgba(30, 127, 224, .32);
 }
 
 #banner {
-  margin: 2px 2px 0; background: var(--soft-gold); border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+  margin: 2px 2px 0; background: var(--soft-gold); border: 1px solid var(--mix-gold-40);
   color: var(--fg-gold); border-radius: var(--r-sm); padding: 8px 11px; font-size: 12px;
   display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; box-shadow: var(--e1);
 }
 #banner button {
-  border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent); background: var(--card);
+  border: 1px solid var(--mix-gold-55); background: var(--card);
   color: var(--fg-gold); border-radius: var(--r-xs); padding: 3px 10px; font-size: 11px; margin-left: auto;
   transition: transform var(--dur) var(--ease);
 }
@@ -286,15 +474,15 @@ b, strong { font-weight: 700; }
 #bench-stage::before {
   /* 台面 */
   content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 26%;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--bench) 55%, transparent));
-  border-top: 1px solid color-mix(in srgb, var(--bench) 70%, transparent);
+  background: linear-gradient(180deg, transparent, var(--mix-bench-55));
+  border-top: 1px solid var(--mix-bench-70);
   pointer-events: none;
 }
 #bench-stage.drop-zone.hot {
   border-color: var(--blue);
   background:
     repeating-linear-gradient(90deg, var(--stage-line) 0 1px, transparent 1px 26px),
-    radial-gradient(circle at 50% 100%, color-mix(in srgb, var(--blue) 22%, var(--stage-top)) 0%, var(--stage-top) 66%);
+    radial-gradient(circle at 50% 100%, var(--mix-blue-22-stage_top) 0%, var(--stage-top) 66%);
   box-shadow: var(--ring), inset 0 1px 0 rgba(255, 255, 255, .7);
 }
 #bench-stage.shake { animation: shake .5s var(--ease); }
@@ -328,7 +516,7 @@ b, strong { font-weight: 700; }
    线条颜色只吃皮肤变量，三套皮肤不用各画一份；液体画在容器轮廓内部，
    默认透明，容器"装了东西"时由 .wet 淡入 —— 换容器时形状会变，液体不会再溢出器壁。 */
 .v-ic {
-  --ic-line: color-mix(in srgb, var(--ink) 76%, transparent);
+  --ic-line: var(--mix-ink-76);
   --ic-liq: var(--blue);
   display: block; width: 100%; height: 100%;
 }
@@ -342,7 +530,7 @@ b, strong { font-weight: 700; }
 }
 .v-ic .v-l {
   /* 一圈细边当液面：氢氧这类无色气体混出来的液体几乎透明，只靠填充玩家会以为台面是空的 */
-  fill: var(--ic-liq); stroke: color-mix(in srgb, var(--ic-line) 42%, transparent);
+  fill: var(--ic-liq); stroke: var(--mix-ic-line-42);
   stroke-width: .9; stroke-linejoin: round; opacity: 0;
   transition: opacity var(--dur-slow) var(--ease), fill var(--dur-slow) var(--ease);
 }
@@ -369,14 +557,14 @@ b, strong { font-weight: 700; }
 #placed-list li .dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255, 255, 255, .6); flex: none; }
 #placed-list li b {
   width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%;
-  font-size: 11px; line-height: 1; color: var(--faint); background: var(--soft-gray);
+  font-size: 11px; line-height: 1; color: var(--muted); background: var(--soft-gray);
   transition: all var(--dur) var(--ease);
 }
-#placed-list li b:hover { color: #fff; background: var(--red); }
-#fx-canvas { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+#placed-list li b:hover { color: var(--solid-fg); background: var(--solid-red); }
+#fx-canvas { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 2; }
 #drop-hint {
   position: absolute; bottom: 7px; width: 100%; text-align: center;
-  font-size: 11px; color: var(--faint); pointer-events: none; transition: opacity var(--dur) var(--ease);
+  font-size: 11px; color: var(--muted); pointer-events: none; transition: opacity var(--dur) var(--ease);
   z-index: 1;
 }
 
@@ -386,11 +574,11 @@ b, strong { font-weight: 700; }
   display: flex; align-items: baseline; gap: 7px; padding: 0 2px;
   font-size: 10.5px; letter-spacing: 1.1px; color: var(--sub); font-weight: 800;
 }
-#quick-shelf .qs-head span { font-weight: 400; letter-spacing: .2px; color: var(--faint); }
+#quick-shelf .qs-head span { font-weight: 400; letter-spacing: .2px; color: var(--muted); }
 /* 架子右上角的"下一步"：空架子时去采购，装不下时去物质页看全部 */
 #quick-shelf .qs-act {
   margin-left: auto; flex: none; align-self: center;
-  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line)); background: var(--soft-blue);
+  border: 1px solid var(--mix-blue-34-line); background: var(--soft-blue);
   color: var(--fg-blue); border-radius: var(--r-pill); padding: 3px 10px; font-size: 10.5px; font-weight: 700;
   transition: transform var(--dur) var(--ease);
 }
@@ -404,28 +592,37 @@ b, strong { font-weight: 700; }
 #qs-row .item-card .zh { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #qs-row .item-card .fm { display: none; }
 #qs-row .item-card .cnt { top: 2px; right: 2px; font-size: 9px; padding: 1px 4px; }
-#qs-row .qs-none { font-size: 11.5px; color: var(--faint); padding: 10px 4px; }
+#qs-row .qs-none { font-size: 11.5px; color: var(--muted); padding: 10px 4px; }
 /* "还有 N 种没显示" → 点它去物质页；颜色固定，不跟随物质 */
 #qs-row .qs-more .sq { background: var(--soft-gray); color: var(--fg-gray); font-size: 13px; }
+
+/* H3：图鉴 / 背包 / 沙盒材料柜 / 采购列表的长列表分页。
+   物质架那张"更多"的样式原来锁在 #qs-row 里，页面版复用同一张卡就得再抄一份灰色块，
+   所以把它放开到 .item-card.qs-more（物质架那条更具体，两边表现不变）。 */
+.item-card.qs-more { cursor: pointer; }
+.item-card.qs-more .sq { background: var(--soft-gray); color: var(--fg-gray); font-size: 13px; }
+.item-card.qs-more .zh { color: var(--muted); }
+.more-row { align-items: center; }
+.more-row small { color: var(--muted); }
 
 /* 控制条 */
 #controls { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); flex: none; }
 .ctl-group { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 /* 两组控件各自有名字：条件（温度/电解）与用量（批量倍率），别让新手猜 */
-.ctl-lbl { flex: none; font-size: 10px; font-weight: 800; letter-spacing: 1.2px; color: var(--faint); }
+.ctl-lbl { flex: none; font-size: 10px; font-weight: 800; letter-spacing: 1.2px; color: var(--muted); }
 .temp-btn {
   border: 1px solid var(--line); background: var(--card); color: var(--sub);
   border-radius: var(--r-pill); padding: 6px 13px; font-size: 12px; box-shadow: var(--e1);
   transition: all var(--dur) var(--ease);
 }
-.temp-btn:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+.temp-btn:hover:not(:disabled) { border-color: var(--blue); color: var(--fg-blue); }
 .temp-btn:active:not(:disabled) { transform: scale(.95); }
 .temp-btn.on {
-  background: var(--g-brand); border-color: transparent; color: #fff; font-weight: 700;
+  background: var(--g-brand); border-color: transparent; color: var(--solid-fg); font-weight: 700;
   box-shadow: 0 4px 12px rgba(30, 127, 224, .3);
 }
 .temp-btn:disabled { opacity: .38; cursor: not-allowed; }
-#btn-elec.on { background: linear-gradient(135deg, var(--purple), var(--blue)); border-color: transparent; color: #fff; font-weight: 700; }
+#btn-elec.on { background: linear-gradient(135deg, var(--solid-purple), var(--solid-blue)); border-color: transparent; color: var(--solid-fg); font-weight: 700; }
 #sel-mult {
   border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 7px; font-size: 12px;
   background: var(--card); color: var(--ink); box-shadow: var(--e1); font-family: inherit;
@@ -434,8 +631,8 @@ b, strong { font-weight: 700; }
   flex: none; font-size: 11.5px; color: var(--sub); text-align: center; min-height: 16px;
   font-variant-numeric: tabular-nums;
 }
-#cost-preview b { color: var(--green); }
-#cost-preview .warn { color: var(--red); font-weight: 600; }
+#cost-preview b { color: var(--fg-green); }
+#cost-preview .warn { color: var(--fg-red); font-weight: 600; }
 
 /* 动作条 */
 #actionbar { display: flex; gap: var(--s2); flex: none; align-items: stretch; flex-wrap: wrap; }
@@ -445,9 +642,9 @@ b, strong { font-weight: 700; }
 }
 #ins-wrap input { accent-color: var(--blue); width: 15px; height: 15px; }
 #btn-react {
-  flex: 1; border-radius: var(--r); padding: 14px 0; font-size: 16px; font-weight: 800; color: #fff;
+  flex: 1; border-radius: var(--r); padding: 14px 0; font-size: 16px; font-weight: 800; color: var(--solid-fg);
   letter-spacing: 1.5px; background: var(--g-primary);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--blue) 42%, transparent);
+  box-shadow: 0 6px 18px var(--mix-blue-42);
   position: relative; overflow: hidden;
   transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), filter var(--dur) var(--ease);
 }
@@ -457,7 +654,7 @@ b, strong { font-weight: 700; }
   transform: translateX(-160%); animation: sweep 3.4s var(--ease) infinite;
 }
 #btn-react:hover { filter: brightness(1.06); }
-#btn-react:active { transform: translateY(1px) scale(.985); box-shadow: 0 2px 8px color-mix(in srgb, var(--blue) 40%, transparent); }
+#btn-react:active { transform: translateY(1px) scale(.985); box-shadow: 0 2px 8px var(--mix-blue-40); }
 @keyframes sweep { 0% { transform: translateX(-160%) } 55%, 100% { transform: translateX(320%) } }
 
 .ghost {
@@ -477,12 +674,12 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   box-shadow: 0 -4px 18px rgba(18, 48, 80, .07);
 }
 #bottom-nav button {
-  position: relative; flex: 1; min-width: 0; padding: 7px 0 6px; font-size: 16px; color: var(--faint);
+  position: relative; flex: 1; min-width: 0; padding: 7px 0 6px; font-size: 16px; color: var(--muted);
   line-height: 1.1; transition: color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 #bottom-nav button i { display: block; font-style: normal; font-size: 9.5px; letter-spacing: .2px; margin-top: 2px; }
 #bottom-nav button:active { transform: translateY(1px) scale(.94); }
-#bottom-nav button.on { color: var(--blue); }
+#bottom-nav button.on { color: var(--fg-blue); }
 #bottom-nav button.on::before {
   content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
   width: 20px; height: 3px; border-radius: 0 0 3px 3px; background: var(--g-primary);
@@ -492,15 +689,15 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 #bottom-nav button[data-tab="bench"].on { font-weight: 700; }
 #bottom-nav button[data-tab="bench"].on::after {
   content: ""; position: absolute; left: 50%; bottom: 3px; transform: translateX(-50%);
-  width: 16px; height: 2px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--blue) 45%, transparent);
+  width: 16px; height: 2px; border-radius: var(--r-pill); background: var(--mix-blue-45);
 }
 /* 可领奖励角标：数字来自 panels.js 的同一份计数，段上几个这里就几个 */
 .nav-badge {
   position: absolute; left: 50%; margin-left: 3px; top: 4px; z-index: 2; pointer-events: none;
   min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--r-pill);
-  background: var(--red); color: #fff; font-style: normal; font-size: 9.5px; font-weight: 800; line-height: 15px;
+  background: var(--solid-red); color: var(--solid-fg); font-style: normal; font-size: 9.5px; font-weight: 800; line-height: 15px;
   text-align: center; font-variant-numeric: tabular-nums;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--red) 40%, transparent);
+  box-shadow: 0 2px 6px var(--mix-red-40);
   animation: chip-in var(--dur) var(--ease-out);
 }
 /* 只表示"这里有情况要看"（如游客未转正）：不写数字时缩成一枚小红点 */
@@ -511,11 +708,11 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 #page-head {
   position: relative; flex: none; display: flex; align-items: center;
   padding: 11px 14px 10px;
-  background: var(--g-topbar); color: #fff;
+  background: var(--g-topbar); color: var(--topbar-fg);
   box-shadow: 0 4px 14px rgba(12, 40, 74, .18);
 }
 #page-head b { font-size: 16px; letter-spacing: .6px; }
-#page-head small { margin-left: auto; font-size: 11px; opacity: .8; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-head small { margin-left: auto; font-size: 11px; color: var(--topbar-dim); text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #page-head small:empty { display: none; }
 #page-body {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -524,9 +721,9 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 /* 就地回实验台的落点：投放后不用先点导航 */
 #page-fab {
   position: absolute; right: 14px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 25;
-  background: var(--g-primary); color: #fff; border-radius: var(--r-pill);
+  background: var(--g-primary); color: var(--solid-fg); border-radius: var(--r-pill);
   padding: 10px 16px; font-size: 12.5px; font-weight: 700; letter-spacing: .3px;
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--blue) 40%, transparent);
+  box-shadow: 0 8px 22px var(--mix-blue-40);
   animation: chip-in var(--dur-slow) var(--ease-out);
   transition: transform var(--dur) var(--ease);
 }
@@ -547,20 +744,23 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   border-radius: var(--r-pill); padding: 6px 13px; font-size: 12.5px; font-weight: 600; white-space: nowrap;
   transition: all var(--dur) var(--ease);
 }
-.seg:hover:not(.on) { border-color: var(--blue); color: var(--blue); }
+.seg:hover:not(.on) { border-color: var(--blue); color: var(--fg-blue); }
 .seg:active { transform: scale(.95); }
 .seg.on {
-  background: var(--g-brand); border-color: transparent; color: #fff; font-weight: 700;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--blue) 30%, transparent);
+  background: var(--g-brand); border-color: transparent; color: var(--solid-fg); font-weight: 700;
+  box-shadow: 0 4px 12px var(--mix-blue-30);
 }
 .seg .pip {
   font-style: normal; font-size: 10px; font-weight: 800; line-height: 1; vertical-align: 0;
   margin-left: 6px; padding: 2.5px 5px; border-radius: var(--r-pill);
   background: var(--soft-orange); color: var(--fg-orange); font-variant-numeric: tabular-nums;
 }
-.seg.on .pip { background: rgba(255, 255, 255, .92); color: var(--orange); }
+/* H5：选中段是亮色渐变块，上面这枚数字徽标原来固定"半透明白底 + --fg-orange"。
+   默认皮没问题，赛博皮的 --fg-orange 是 #fcd34d（亮黄）压在半透明白底上≈读不出；
+   复古皮的橙字压奶油底也偏淡。徽标自己拿一档 --pip-bg/--pip-fg，各皮分别配平。 */
+.seg.on .pip { background: var(--pip-bg); color: var(--pip-fg); }
 .seg .pip.dot { width: 7px; height: 7px; padding: 0; background: var(--red); color: transparent; }
-.seg.on .pip.dot { background: #fff; }
+.seg.on .pip.dot { background: var(--pip-bg); }
 
 /* ---------- 6.2 页内卡片组与统计条 ---------- */
 /* 一页里每个"决定范围"是一张卡：卡头说清这是哪件事、卡身只放这件事的行。 */
@@ -574,7 +774,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   background: linear-gradient(180deg, var(--card), var(--card-2));
 }
 .card-hd b { font-size: 13.5px; letter-spacing: .3px; }
-.card-hd span { margin-left: auto; font-size: 11px; color: var(--faint); text-align: right; }
+.card-hd span { margin-left: auto; font-size: 11px; color: var(--muted); text-align: right; }
 .card-bd { padding: 7px 11px 11px; }
 .card-bd > .hint-p:last-child { margin-top: 10px; }
 .card-sub {
@@ -582,7 +782,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   font-size: 10.5px; font-weight: 800; letter-spacing: 1.2px; color: var(--sub);
 }
 .card-sub::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
-.card.danger { border-color: color-mix(in srgb, var(--red) 36%, var(--line)); }
+.card.danger { border-color: var(--mix-red-36-line); }
 .card.danger .card-hd { background: var(--soft-red); }
 .card.danger .card-hd b { color: var(--fg-red); }
 
@@ -599,9 +799,9 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   display: block; font-size: 13.5px; line-height: 1.25; color: var(--ink);
   font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.stat span { display: block; font-size: 10px; color: var(--faint); margin-top: 2px; letter-spacing: .2px; }
-.stat.warn b { color: var(--red); }
-.stat.hot { background: var(--soft-gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
+.stat span { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; letter-spacing: .2px; }
+.stat.warn b { color: var(--fg-red); }
+.stat.hot { background: var(--soft-gold); border-color: var(--mix-gold-40); }
 .stat.hot b { color: var(--fg-gold); }
 
 /* 卡内筛选：比 .tabs 轻一档，用于"全部/元素/化合物…"这类就地过滤 */
@@ -611,9 +811,9 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   border-radius: var(--r-pill); padding: 4px 11px; font-size: 11.5px;
   transition: all var(--dur) var(--ease);
 }
-.chips button:hover:not(.on) { border-color: var(--blue); color: var(--blue); }
+.chips button:hover:not(.on) { border-color: var(--blue); color: var(--fg-blue); }
 .chips button.on {
-  background: var(--soft-blue); border-color: color-mix(in srgb, var(--blue) 45%, transparent);
+  background: var(--soft-blue); border-color: var(--mix-blue-45);
   color: var(--fg-blue); font-weight: 700;
 }
 .chips button:active { transform: scale(.95); }
@@ -628,7 +828,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 
 .rowtools { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s2); }
 .rowtools .tabs { margin-bottom: 0; }
-.rowtip { font-size: 10.5px; color: var(--faint); }
+.rowtip { font-size: 10.5px; color: var(--muted); }
 .rows { display: flex; flex-direction: column; }
 
 /* 空状态：一律给一个"下一步去哪儿"，不留死胡同 */
@@ -646,19 +846,19 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   box-shadow: inset 0 0 0 1px var(--line);
 }
 .sign-dots i.on { background: var(--g-primary); box-shadow: none; }
-.sign-dots i.big { background: var(--soft-gold); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 45%, transparent); }
-.sign-dots i.big.on { background: var(--g-gold); box-shadow: 0 2px 6px color-mix(in srgb, var(--gold) 40%, transparent); }
+.sign-dots i.big { background: var(--soft-gold); box-shadow: inset 0 0 0 1px var(--mix-gold-45); }
+.sign-dots i.big.on { background: var(--g-gold); box-shadow: 0 2px 6px var(--mix-gold-40); }
 
 .avatar {
   flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
   font-size: 17px; background: var(--soft-blue);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--mix-blue-22);
 }
 .row.rank .rk {
-  flex: none; width: 20px; text-align: center; font-size: 12px; font-weight: 800; color: var(--faint);
+  flex: none; width: 20px; text-align: center; font-size: 12px; font-weight: 800; color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.card-bd > .row.rank:nth-child(-n+3) .rk { color: var(--gold); }
+.card-bd > .row.rank:nth-child(-n+3) .rk { color: var(--fg-gold); }
 
 .skin-prev {
   flex: none; width: 34px; height: 34px; border-radius: var(--r-sm);
@@ -680,9 +880,9 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 .sec:first-child { margin-top: 2px; }
 .sec::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
 
-.hint-p { color: var(--faint); font-size: 11.5px; line-height: 1.6; margin: 8px 2px 0; }
+.hint-p { color: var(--muted); font-size: 11.5px; line-height: 1.6; margin: 8px 2px 0; }
 .empty {
-  text-align: center; color: var(--faint); font-size: 12.5px; padding: 26px 12px;
+  text-align: center; color: var(--muted); font-size: 12.5px; padding: 26px 12px;
   background: var(--card-2); border: 1px dashed var(--line); border-radius: var(--r);
 }
 
@@ -692,10 +892,10 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   border-radius: var(--r-pill); padding: 5px 13px; font-size: 12px; box-shadow: var(--e1);
   transition: all var(--dur) var(--ease);
 }
-.tabs button:hover:not(.on) { border-color: var(--blue); color: var(--blue); }
+.tabs button:hover:not(.on) { border-color: var(--blue); color: var(--fg-blue); }
 .tabs button.on {
-  background: var(--g-brand); color: #fff; border-color: transparent; font-weight: 700;
-  box-shadow: 0 3px 10px color-mix(in srgb, var(--blue) 28%, transparent);
+  background: var(--g-brand); color: var(--solid-fg); border-color: transparent; font-weight: 700;
+  box-shadow: 0 3px 10px var(--mix-blue-28);
 }
 .tabs button:active { transform: scale(.95); }
 
@@ -705,23 +905,23 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   text-align: center; position: relative; cursor: grab; touch-action: none; box-shadow: var(--e1);
   transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.item-card:hover { transform: translateY(-2px); box-shadow: var(--e2); border-color: color-mix(in srgb, var(--blue) 35%, var(--line)); }
+.item-card:hover { transform: translateY(-2px); box-shadow: var(--e2); border-color: var(--mix-blue-35-line); }
 .item-card:active { transform: scale(.95); cursor: grabbing; }
 .item-card .sq {
   width: 46px; height: 46px; margin: 0 auto 5px; border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
-  font-size: 15px; font-weight: 800; color: #fff; background: var(--faint);
+  font-size: 15px; font-weight: 800; color: var(--badge-fg); background: var(--badge-bg);
   box-shadow: inset 0 -7px 12px rgba(0, 0, 0, .16), 0 3px 8px rgba(18, 48, 80, .16);
   word-break: break-all; line-height: 1.05; padding: 2px;
 }
 .item-card .sq::before {
-  content: ""; position: absolute; inset: 0;
+  content: ""; position: absolute; left: 0; right: 0; top: 0; bottom: 0;
   background: linear-gradient(160deg, rgba(255, 255, 255, .42), transparent 46%);
 }
 .item-card .zh { font-size: 12px; color: var(--ink); font-weight: 600; }
 .item-card .fm { font-size: 10px; color: var(--sub); margin-top: 1px; }
 .item-card .cnt {
-  position: absolute; top: 5px; right: 5px; background: var(--green); color: #fff;
+  position: absolute; top: 5px; right: 5px; background: var(--solid-green); color: var(--solid-fg);
   font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
   border-radius: var(--r-pill); padding: 1px 6px; box-shadow: 0 2px 5px rgba(0, 0, 0, .18);
 }
@@ -738,12 +938,12 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 .row[data-eq], .row[data-sub], .row[data-id], .eqrow { cursor: pointer; }
 .row:hover { background: var(--card-2); }
 .eqrow:hover { background: var(--soft-blue); }
-.row.you { background: var(--soft-gold); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); }
+.row.you { background: var(--soft-gold); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--mix-gold-35); }
 .row .grow { flex: 1; min-width: 0; }
 .row small, .grow small { color: var(--sub); display: block; font-size: 11px; margin-top: 1px; line-height: 1.5; }
 .row .dot, .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); flex: none; display: inline-block; }
 
-.price { color: var(--orange); font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.price { color: var(--fg-orange); font-weight: 800; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .bar {
   height: 7px; background: var(--soft-gray); border-radius: var(--r-pill); overflow: hidden; margin-top: 5px;
@@ -756,20 +956,20 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 
 .btn-s {
   border: 0; border-radius: var(--r-sm); padding: 7px 13px; font-size: 12px; font-weight: 600;
-  background: var(--blue); color: #fff; white-space: nowrap; box-shadow: var(--e1);
+  background: var(--solid-blue); color: var(--solid-fg); white-space: nowrap; box-shadow: var(--e1);
   transition: transform var(--dur) var(--ease), filter var(--dur) var(--ease);
 }
 .btn-s:hover:not(:disabled) { filter: brightness(1.08); }
 .btn-s:active:not(:disabled) { transform: scale(.94); }
-.btn-s.g { background: var(--green); }
-.btn-s.o { background: var(--orange); }
-.btn-s.danger { background: var(--red); }
+.btn-s.g { background: var(--solid-green); }
+.btn-s.o { background: var(--solid-orange); }
+.btn-s.danger { background: var(--solid-red); }
 .btn-s:disabled { opacity: .4; cursor: not-allowed; }
 
 .ok {
   display: block; width: 100%; border: 0; border-radius: var(--r); padding: 12px 0; margin-top: var(--s3);
-  background: var(--g-primary); color: #fff; font-size: 15px; font-weight: 800; letter-spacing: 1px;
-  box-shadow: 0 5px 16px color-mix(in srgb, var(--blue) 34%, transparent);
+  background: var(--g-primary); color: var(--solid-fg); font-size: 15px; font-weight: 800; letter-spacing: 1px;
+  box-shadow: 0 5px 16px var(--mix-blue-34);
   transition: transform var(--dur) var(--ease), filter var(--dur) var(--ease);
 }
 .ok:hover { filter: brightness(1.06); }
@@ -781,7 +981,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 12px; color: var(--sub);
 }
 .kv:last-of-type { border-bottom: 0; }
-.kv b { color: var(--blue); font-variant-numeric: tabular-nums; }
+.kv b { color: var(--fg-blue); font-variant-numeric: tabular-nums; }
 
 .inp {
   flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-sm);
@@ -789,6 +989,8 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .inp:focus { border-color: var(--blue); box-shadow: var(--ring); background: var(--card); }
+/* 举报弹窗里的那段说明：textarea 也套 .inp，但默认允许斜向拖拽，会把弹窗里的按钮顶出可视区 */
+textarea.inp { resize: vertical; line-height: 1.55; }
 .rng { width: 120px; accent-color: var(--blue); }
 
 .tag {
@@ -812,7 +1014,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 
 /* ---------- 8. 模态 ---------- */
 #modal-root {
-  position: absolute; inset: 0; background: var(--scrim); z-index: 60;
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; background: var(--scrim); z-index: 60;
   display: flex; align-items: center; justify-content: center; padding: var(--s5);
   backdrop-filter: blur(4px); animation: fade var(--dur) var(--ease);
 }
@@ -831,7 +1033,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 @keyframes pop { from { transform: scale(.88) translateY(10px); opacity: 0 } to { transform: none; opacity: 1 } }
 #modal-card h3 { margin: 0 0 var(--s3); font-size: 17px; text-align: center; letter-spacing: .6px; line-height: 1.4; }
 #modal-card .eq {
-  background: var(--soft-blue); border: 1px solid color-mix(in srgb, var(--blue) 22%, transparent);
+  background: var(--soft-blue); border: 1px solid var(--mix-blue-22);
   border-radius: var(--r-sm); padding: 11px; text-align: center; font-size: 15px; font-weight: 700;
   margin: var(--s2) 0; word-break: break-word; letter-spacing: .4px;
 }
@@ -859,10 +1061,12 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 }
 .ad-bar { height: 7px; background: rgba(255, 255, 255, .14); border-radius: var(--r-pill); margin-top: 10px; overflow: hidden; }
 .ad-bar i { display: block; height: 100%; background: var(--g-gold); width: 0; transition: width 1s linear; border-radius: inherit; }
+/* 广告中心的冷却倒计时：本页数字只做展示，能不能点最终由服务端签发时再判一次 */
+.ad-cd { color: var(--fg-gold); font-variant-numeric: tabular-nums; }
 .gold-line {
   margin-top: var(--s2); padding: 9px 11px; background: var(--soft-gold); border-radius: var(--r-sm);
   color: var(--fg-gold); font-weight: 700; font-size: 13px; text-align: center;
-  border: 1px solid color-mix(in srgb, var(--gold) 28%, transparent);
+  border: 1px solid var(--mix-gold-28);
 }
 
 /* ---------- 10. toast ---------- */
@@ -877,15 +1081,15 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   animation: toast-in var(--dur-slow) var(--ease-out);
 }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-10px) scale(.94) } to { opacity: 1; transform: none } }
-#toasts .toast.good { background: var(--soft-green); color: var(--fg-green); border-color: color-mix(in srgb, var(--green) 40%, transparent); font-weight: 600; }
-#toasts .toast.bad { background: var(--soft-red); color: var(--fg-red); border-color: color-mix(in srgb, var(--red) 40%, transparent); font-weight: 600; }
-#toasts .toast.gold { background: var(--soft-gold); color: var(--fg-gold); border-color: color-mix(in srgb, var(--gold) 45%, transparent); font-weight: 700; }
+#toasts .toast.good { background: var(--soft-green); color: var(--fg-green); border-color: var(--mix-green-40); font-weight: 600; }
+#toasts .toast.bad { background: var(--soft-red); color: var(--fg-red); border-color: var(--mix-red-40); font-weight: 600; }
+#toasts .toast.gold { background: var(--soft-gold); color: var(--fg-gold); border-color: var(--mix-gold-45); font-weight: 700; }
 
 /* ---------- 11. 拖拽幽灵 ---------- */
 #drag-ghost {
   position: absolute; z-index: 90; pointer-events: none; width: 52px; height: 52px; margin: -26px 0 0 -26px;
   border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center;
-  color: #fff; font-weight: 800; font-size: 14px; background: var(--faint);
+  color: var(--badge-fg); font-weight: 800; font-size: 14px; background: var(--badge-bg);
   box-shadow: 0 10px 26px rgba(10, 40, 70, .42); border: 2px solid rgba(255, 255, 255, .85);
   transform: rotate(-4deg) scale(1.06);
 }
@@ -893,7 +1097,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 
 /* ---------- 12. 教程 ---------- */
 #tutorial-root {
-  position: absolute; inset: 0; z-index: 70; background: var(--scrim); backdrop-filter: blur(3px);
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 70; background: var(--scrim); backdrop-filter: blur(3px);
   display: flex; align-items: flex-end; justify-content: center;
   padding: 0 var(--s4) calc(96px + env(safe-area-inset-bottom));
 }
@@ -920,8 +1124,8 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 
 /* ---------- 13. 启动门 ---------- */
 #boot-root {
-  position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
-  padding: var(--s5); background: var(--g-brand); color: #eaf3ff; overflow: hidden;
+  position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
+  padding: var(--s5); background: var(--g-brand); color: var(--solid-fg); overflow: hidden;
 }
 #boot-root::before, #boot-root::after {
   content: ""; position: absolute; border-radius: 50%; filter: blur(.5px); pointer-events: none;
@@ -935,17 +1139,17 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 #boot-card h3 { margin: 0 0 var(--s3); font-size: 20px; letter-spacing: 2px; font-weight: 800; text-shadow: 0 2px 10px rgba(0, 0, 0, .25); }
 #boot-card .boot-emoji { font-size: 52px; animation: bootspin 2.4s ease-in-out infinite; filter: drop-shadow(0 8px 16px rgba(0, 0, 0, .3)); }
 @keyframes bootspin { 0%, 100% { transform: rotate(-8deg) scale(1) } 50% { transform: rotate(8deg) scale(1.08) } }
-#boot-msg { font-size: 13px; color: rgba(230, 243, 255, .82); min-height: 20px; line-height: 1.75; }
+#boot-msg { font-size: 13px; color: var(--solid-dim); min-height: 20px; line-height: 1.75; }
 #boot-actions { margin-top: var(--s4); }
 #boot-actions .ok {
-  background: var(--g-gold); color: #3d2c07;
+  background: var(--g-gold); color: var(--gold-fg);
   box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
 }
-#boot-card .boot-foot { margin-top: var(--s5); font-size: 11px; color: rgba(220, 236, 252, .62); line-height: 1.7; }
+#boot-card .boot-foot { margin-top: var(--s5); font-size: 11px; color: var(--solid-dim); line-height: 1.7; }
 
 /* ---------- 14. 登录 / 注册页（鉴权门） ---------- */
 #gate-root {
-  position: fixed; inset: 0; z-index: 95; display: flex; align-items: center; justify-content: center;
+  position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 95; display: flex; align-items: center; justify-content: center;
   padding: var(--s4); background: var(--g-brand); color: var(--ink); overflow-y: auto;
 }
 #gate-root.hidden { display: none; }
@@ -964,7 +1168,7 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 .gate-head { text-align: center; margin-bottom: var(--s4); }
 .gate-emoji {
   display: inline-grid; place-items: center; width: 66px; height: 66px; font-size: 34px;
-  border-radius: var(--r-lg); background: var(--g-brand); box-shadow: 0 10px 24px color-mix(in srgb, var(--blue) 36%, transparent);
+  border-radius: var(--r-lg); background: var(--g-brand); box-shadow: 0 10px 24px var(--mix-blue-36);
 }
 .gate-head h3 { margin: var(--s3) 0 5px; font-size: 19px; letter-spacing: 1.1px; font-weight: 800; }
 .gate-slogan { margin: 0; font-size: 11.5px; color: var(--sub); line-height: 1.7; }
@@ -980,27 +1184,27 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 .gate-eye {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   width: 34px; height: 34px; border-radius: var(--r-sm); font-size: 15px; line-height: 1;
-  color: var(--faint); transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  color: var(--muted); transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .gate-eye:hover { background: var(--soft-gray); color: var(--ink); }
 .gate-err {
   margin-top: var(--s3); padding: 8px 11px; border-radius: var(--r-xs); font-size: 12px; line-height: 1.55;
-  background: var(--soft-red); color: var(--fg-red); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+  background: var(--soft-red); color: var(--fg-red); border: 1px solid var(--mix-red-30);
   animation: shake .4s var(--ease);
 }
 #gate-form .ok { margin-top: var(--s4); padding: 13px 0; }
 #gate-form.gate-busy { opacity: .62; pointer-events: none; }
 .gate-forgot { display: block; margin: var(--s3) auto 0; padding: 3px 6px; border: 0; background: none;
   color: var(--sub); font-size: 11.5px; text-decoration: underline dotted; text-underline-offset: 3px; }
-.gate-forgot:hover { color: var(--blue); }
+.gate-forgot:hover { color: var(--fg-blue); }
 .gate-help { margin-top: var(--s3); padding: 10px 12px; border-radius: var(--r-xs); font-size: 11.5px;
   line-height: 1.7; color: var(--sub); text-align: left; background: var(--soft-blue);
-  border: 1px solid color-mix(in srgb, var(--blue) 24%, transparent); }
+  border: 1px solid var(--mix-blue-24); }
 .gate-help p { margin: 0 0 5px; }
 .gate-help p:last-child { margin-bottom: 0; }
-.gate-help b { color: var(--blue); }
+.gate-help b { color: var(--fg-blue); }
 
-.gate-or { display: flex; align-items: center; gap: var(--s2); margin: var(--s4) 0 var(--s3); color: var(--faint); font-size: 11px; }
+.gate-or { display: flex; align-items: center; gap: var(--s2); margin: var(--s4) 0 var(--s3); color: var(--muted); font-size: 11px; }
 .gate-or::before, .gate-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .gate-guest {
   display: block; width: 100%; padding: 12px 0; border: 1px dashed var(--line); border-radius: var(--r);
@@ -1013,21 +1217,126 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 #gate-tip { margin: var(--s3) 4px 0; text-align: center; line-height: 1.65; }
 .gate-foot {
   display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: var(--s4);
-  padding-top: var(--s3); border-top: 1px solid var(--line-soft); font-size: 10.5px; color: var(--faint);
+  padding-top: var(--s3); border-top: 1px solid var(--line-soft); font-size: 10.5px; color: var(--muted);
 }
-.gate-foot .dot.up { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
-.gate-foot .dot.down { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent); }
+.gate-foot .dot.up { background: var(--green); box-shadow: 0 0 0 3px var(--mix-green-22); }
+.gate-foot .dot.down { background: var(--red); box-shadow: 0 0 0 3px var(--mix-red-22); }
 @media (max-height: 720px) {
   #gate-card { padding: var(--s4) var(--s4) var(--s3); }
   .gate-emoji { width: 54px; height: 54px; font-size: 28px; }
   .gate-head { margin-bottom: var(--s3); }
 }
 
+/* ---------- 14.1 壳内适配：TapTap 入口 / 协议 / 网络状态 / 防沉迷页 ---------- */
+.gate-taptap {
+  display: block; width: 100%; padding: 12px 0; margin-bottom: var(--s2);
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--soft-green); color: var(--fg-green);
+  font-size: 13.5px; font-weight: 700; letter-spacing: .4px; transition: all var(--dur) var(--ease);
+}
+.gate-taptap:hover:not(:disabled) { border-color: var(--green); }
+.gate-taptap:active:not(:disabled) { transform: scale(.985); }
+.gate-taptap:disabled { opacity: .6; }
+.gate-legal {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px;
+  margin-top: var(--s3); font-size: 10.5px; color: var(--muted); line-height: 1.6;
+}
+.gate-legal .legal-link {
+  border: 0; background: none; padding: 2px 3px; font-size: 10.5px; font-weight: 700;
+  color: var(--fg-blue); text-decoration: underline; cursor: pointer;
+}
+.gate-legal span { color: var(--line); }
+.gate-legal em { font-style: normal; }
+/* 协议正文（modal 内）：一条一段，左对齐，别让它看起来像营销文案 */
+.legal p { margin: 0 0 var(--s2); font-size: 12px; line-height: 1.75; color: var(--ink); text-align: left; }
+.legal p:last-child { margin-bottom: 0; }
+/* 壳内首次运行的同意弹窗：两个协议入口并排，正文只有一份（cloud.js 的 legal 表） */
+.consent-links { display: flex; gap: var(--s2); justify-content: center; margin: var(--s3) 0; }
+.consent-links button { flex: 1; min-width: 0; }
+.consent-note { margin-top: var(--s2); font-size: 10.5px; color: var(--muted); line-height: 1.6; }
+
+/* 顶栏网络状态芯片：只在请求拖久或失败时出现，点一下立刻重试一次取帧 */
+.net-chip {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 8px; margin-right: 6px;
+  border-radius: var(--r-pill); font-size: 10.5px; font-weight: 700; letter-spacing: .3px; white-space: nowrap;
+  background: var(--topbar-pill); color: var(--topbar-fg); border: 1px solid rgba(255, 255, 255, .3);
+}
+/* H5：原来 wait/bad 把整枚芯片的文字染成 #ffe08a / #ffb3ab，在顶栏渐变最亮的一段上
+   只有 4.0:1，比正文还难读。改成"文字恒白 + 状态色只画在圆点上"：点是非文本提示，
+   不参与对比度门槛，字仍然读得出。
+   24px 是 WCAG 2.5.8 的绝对下限（不是苹果的 44）：这一枚是自动重连之外的手动兜底，
+   抬到 44 会把整条顶栏顶高，而它本身可有可无。 */
+.net-chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--chip-dot, currentColor); }
+.net-chip.wait { --chip-dot: #ffe08a; animation: netpulse 1.1s ease-in-out infinite; }
+.net-chip.bad { --chip-dot: #ffb3ab; }
+@keyframes netpulse { 0%, 100% { opacity: 1 } 50% { opacity: .5 } }
+
+/* 启动失败的三态说明条：结论来自 /api/healthz，颜色对应"网络／库／会话" */
+.boot-detail {
+  margin: var(--s3) auto 0; max-width: 320px; padding: 9px 11px; text-align: left;
+  font-size: 11.5px; line-height: 1.75; color: var(--solid-dim);
+  background: var(--plate); border-left: 3px solid rgba(255, 255, 255, .45);
+  border-radius: var(--r-xs);
+}
+.boot-detail.net { border-left-color: #ffd45c; }
+.boot-detail.db { border-left-color: #ff9a92; }
+.boot-detail.client { border-left-color: #8ff0c0; }
+.boot-detail.force { border-left-color: #ffd45c; }
+#boot-actions .ghost {
+  margin-left: var(--s2); background: var(--plate-deep); color: var(--solid-fg);
+  border: 1px solid rgba(255, 255, 255, .32); box-shadow: none;
+}
+/* 自动重试的倒计时（C4）：让玩家看见"下一次发生在几秒后"，而不是以为页面卡住 */
+.boot-auto {
+  margin: var(--s3) 0 0; font-size: 11px; line-height: 1.6;
+  color: var(--solid-dim); letter-spacing: .2px;
+}
+
+/* 防沉迷等待页：整屏，不放"跳过" */
+#curfew-root {
+  position: fixed; left: 0; right: 0; top: 0; bottom: 0; z-index: 92; display: flex; align-items: center; justify-content: center;
+  padding: var(--s5); background: var(--g-brand); color: var(--solid-fg); overflow-y: auto;
+}
+#curfew-card {
+  width: 100%; max-width: 340px; margin: auto; text-align: center;
+  padding: var(--s5) var(--s4); border-radius: var(--r-lg);
+  background: var(--plate); border: 1px solid rgba(255, 255, 255, .22); box-shadow: var(--e3);
+}
+#curfew-card .cf-emoji { font-size: 44px; }
+#curfew-card h3 { margin: 6px 0 var(--s3); font-size: 19px; letter-spacing: 1.5px; font-weight: 800; }
+.cf-hint { margin: 0 0 var(--s4); font-size: 12px; line-height: 1.8; color: var(--solid-dim); }
+.cf-count { font-size: 11px; letter-spacing: .6px; color: var(--solid-dim); }
+.cf-clock { margin: 4px 0 var(--s3); font-size: 27px; font-weight: 800; letter-spacing: 1px; font-variant-numeric: tabular-nums; text-shadow: 0 2px 12px rgba(0, 0, 0, .3); }
+.cf-win { margin: 0 0 var(--s3); font-size: 11px; color: var(--solid-dim); }
+.cf-why {
+  margin: 0 0 var(--s4); padding: 8px 10px; font-size: 11.5px; line-height: 1.7; text-align: left;
+  color: var(--solid-dim); background: var(--plate-deep); border-radius: var(--r-xs);
+}
+#curfew-card .ok, #curfew-card .ghost { display: block; width: 100%; }
+#curfew-card .ghost {
+  margin-top: var(--s2); background: var(--plate-deep); color: var(--solid-fg);
+  border: 1px solid rgba(255, 255, 255, .3); box-shadow: none;
+}
+
+/* 省电模式（判定与开关在 js/shell.js）：只砍表现层，不动数值与布局。
+   backdrop-filter 与常驻动画是低端 WebView 掉帧的主因，粒子减半在 fx.js 里做。
+   顶栏那几枚信息片（.pill / .coins / .net-chip）以前也在这张名单里：它们改成实色 token 之后
+   本来就没有模糊可省了，留着只会让人以为半透明又回来了。 */
+html.chem-era-lowfx #topbar, html.chem-era-lowfx #bottom-nav, html.chem-era-lowfx #modal-root { backdrop-filter: none; }
+html.chem-era-lowfx #boot-root::before, html.chem-era-lowfx #boot-root::after,
+html.chem-era-lowfx #gate-root::before, html.chem-era-lowfx #gate-root::after,
+html.chem-era-lowfx #boot-card .boot-emoji, html.chem-era-lowfx .net-chip.wait,
+html.chem-era-lowfx .expbar::after { animation: none; }
+html.chem-era-lowfx .expbar::after { transform: none; opacity: .5; }
+html.chem-era-lowfx #boot-root::before, html.chem-era-lowfx #boot-root::after,
+html.chem-era-lowfx #gate-root::before, html.chem-era-lowfx #gate-root::after { opacity: .35; }
+html.chem-era-lowfx * { transition-duration: .01s !important; }
+
 /* ---------- 15. 语义工具类（供 JS 生成的标记使用） ---------- */
 .sec.tight { margin: 2px 0 var(--s2); }
 .mt { margin-top: var(--s2); }
 .prog { font-size: 12px; color: var(--sub); }
-.prog b { color: var(--green); font-variant-numeric: tabular-nums; }
+.prog b { color: var(--fg-green); font-variant-numeric: tabular-nums; }
 .desc { margin-top: var(--s2); font-size: 12px; line-height: 1.7; color: var(--ink); }
 .sub { color: var(--sub); font-weight: 400; }
 .hint-p.lead { margin: 2px 0 var(--s2); font-size: 12px; }
@@ -1041,17 +1350,17 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
   padding: 10px 12px; background: var(--card-2); border-radius: var(--r-sm); border: 1px solid var(--line-soft);
 }
 .ph.left { text-align: left; margin-top: 6px; }
-.ph.warn-o { color: var(--orange); }
-.ph.warn-r { color: var(--red); font-weight: 600; }
+.ph.warn-o { color: var(--fg-orange); }
+.ph.warn-r { color: var(--fg-red); font-weight: 600; }
 .eqrow b { font-size: 13px; }
-.danger-head { color: var(--red) !important; }
-.ok.danger { background: linear-gradient(135deg, var(--red), #b3211c); box-shadow: 0 5px 16px color-mix(in srgb, var(--red) 34%, transparent); }
+.danger-head { color: var(--fg-red) !important; }
+.ok.danger { background: linear-gradient(135deg, var(--red), #b3211c); box-shadow: 0 5px 16px var(--mix-red-34); }
 .btn-row { display: flex; gap: var(--s2); align-items: stretch; margin-top: var(--s3); }
 .btn-row .ok { flex: 1; width: auto; margin-top: 0; }
 .btn-row .ghost { flex: 0 0 auto; border-radius: var(--r); padding: 12px 16px; }
 .sys-banner {
   position: fixed; left: 8px; right: 8px; top: 8px; z-index: 200; padding: 11px 13px;
-  border-radius: var(--r-sm); background: var(--red); color: #fff; font-size: 13px; line-height: 1.55;
+  border-radius: var(--r-sm); background: var(--solid-red); color: var(--solid-fg); font-size: 13px; line-height: 1.55;
   box-shadow: var(--e3); font-family: var(--font);
 }
 
@@ -1080,9 +1389,32 @@ button.ghost { padding-top: 12px; padding-bottom: 12px; }
 @media (min-width: 481px) {
   /* 桌面预览：留出手机边框感 */
   body { padding: 0; }
-  #app { height: min(100dvh, 900px); margin-top: max(0px, calc((100dvh - 900px) / 2)); border-radius: 0; }
+  #app { height: 100vh; height: min(100dvh, 900px); margin-top: 0; margin-top: max(0px, calc((100dvh - 900px) / 2)); border-radius: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 button:focus-visible, .inp:focus-visible, #sel-mult:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* ---------- 17. H5 命中区兜底（放在最后：同优先级下靠顺序压过上面的组件规则） ----------
+   拇指点 27px 高的目标，偏一点就是"我明明点了"。九个类原来只有 24~31px：
+   顶栏 pill / 房间页签 / 条件按钮 / 分段条 / 页签 / 小按钮 / 筛选 chip / 忘记密码 / 游客入口，
+   一律抬到 --tap-min。
+   代价是顶栏与各横条高约 14px——在 643px 的可视区里换"点得中"，这笔账划得来。
+   注意别用 padding 硬顶：padding 会连带把圆角胶囊撑得很胖，min-height 只补纵向。
+   .gate-eye（密码页的小眼睛）留 34px 没抬：它绝对定位贴在输入框里，抬到 44 会顶出边框，
+   而同一动作（看清密码）在提交前始终还能靠复制粘贴完成。 */
+.pill, .room-tab, .temp-btn, .seg, .tabs button, .btn-s,
+.chips button, .gate-forgot, .gate-guest {
+  min-height: var(--tap-min);
+}
+/* min-height 只在盒模型里生效：这些类原本是 inline 的流内文字按钮，
+   没有 flex 的话文字会贴顶，看着像没居中。 */
+.pill, .room-tab, .temp-btn, .seg, .tabs button, .btn-s,
+.chips button, .gate-guest {
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* .gate-forgot 原来靠 display:block + margin:auto 居中，套进上面那条 inline-flex
+   会丢掉自动居中，所以单开一条块级 flex。 */
+.gate-forgot { display: flex; align-items: center; justify-content: center; }
+
