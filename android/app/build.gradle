@@ -1,0 +1,172 @@
+apply plugin: 'com.android.application'
+
+/**
+ * 广告 SDK（TapADN / Dirichlet SSP）是**本地 AAR**，分发方式决定了它不可能进仓库：
+ * 平台给的是 `dirichlet_ad_x.y.z.aar`（放在 app/libs/），配套 okhttp。所以这里用"文件在不在"当开关，
+ * 但开关切的只是**运行期靠谁**，不再切编译：
+ *   • 没放 AAR → 编译期挂 :tapsdk-stub（同名同类的桩，每个方法都抛"未内置"，且**不进包**），
+ *     壳照常构建，BuildConfig.AD_SDK_BUNDLED=false，ChemeraAd 明确回"广告 SDK 未内置"；
+ *   • 放了 AAR → 依赖换成真 AAR + okhttp，桩退场，同名类只有一份在 classpath 上。
+ * 两种情况下 src/tapadn/java 都被 javac 编过，所以 SDK 签名对不上会在构建期报错而不是提审期发现。
+ */
+def adAar = file('libs').exists() && file('libs').listFiles()?.findAll { it.name.endsWith('.aar') }?.size() > 0
+
+/**
+ * 环境变量 → BuildConfig。口令只在构建机存在，绝不落进仓库（同 server/.env 的规矩）：
+ * mediaKey 是服务端验签用的同一把钥匙，写进提交文件等于把它公开。
+ */
+def envStr = { String key ->
+    def v = System.getenv(key)
+    return v == null ? '' : v.trim()
+}
+def quoted = { String s -> '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"' }
+
+/**
+ * versionName 的唯一真源 = 前端资源版本号 `?v=`（frontend/index.html）。
+ *
+ * 为什么不该在这里手写第二个版本号（方案 §4 ⑤）：商店页展示的就是 versionName，而玩家设备上
+ * "改了不生效"看的是 `?v=`——两个数各写一遍，迟早一个 3.14 一个 3.0.0，运营按版本号说明"这版修了什么"
+ * 就对不上包。同源之后 android-check.sh 那条比对仍然有意义：它比的是**包里的** versionName 与
+ * **包里的** assets/public/index.html，两者分别来自"gradle 构建时读的 frontend/"和"cap sync 时拷的 frontend/"，
+ * 不相等就说明这次构建用的壳内前端是旧的（忘了 npx cap sync android），正是要抓的那种错。
+ */
+def frontendVersion = { ->
+    def f = new File(rootProject.projectDir, '../frontend/index.html')
+    if (!f.exists()) {
+        throw new GradleException("versionName 取不到：找不到 ${f}。本工程假设 frontend/ 与 android/ 平级（见 capacitor.config.ts 的 webDir），目录被挪动了就去改这里。")
+    }
+    def m = f.text =~ /\?v=(\d+(?:\.\d+)+)/
+    if (!m.find()) {
+        throw new GradleException("versionName 取不到：${f} 里没有 ?v=x.y 形式的资源版本号。")
+    }
+    return m.group(1)
+}
+
+android {
+    namespace = "com.chemera.game"
+    compileSdk = rootProject.ext.compileSdkVersion
+    // 本机 SDK 只装了 build-tools 36.1.0 / 37.0.0，而 AGP 8.13 的默认版本可能是别的号；
+    // 写死已装版本，避免构建去联网下 build-tools（no cmdline-tools 的机器上下不下来）。
+    // 换机器时改成那台机器实际装的版本即可，aapt2 对 compileSdk 36 是向前兼容的。
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+
+    defaultConfig {
+        applicationId "com.chemera.game"
+        // Capacitor 8 的底线是 24（方案里原本写 23，以壳框架为准；TapTap 要求 API 21+，24 覆盖得住）。
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // versionCode 就是服务端 /api/app/version 里的 minBuild/latestBuild 比的那个"包版本"，
+        // 也是 TapTap 4.2 要求单调递增的那个数；改它必须同时改后台【APP 版本】，否则老包拦不住。
+        versionCode 1
+        versionName frontendVersion()
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField "String", "AD_MEDIA_ID", quoted(envStr('CHEMERA_AD_MEDIA_ID'))
+        buildConfigField "String", "AD_MEDIA_NAME", quoted(envStr('CHEMERA_AD_MEDIA_NAME'))
+        buildConfigField "String", "AD_MEDIA_KEY", quoted(envStr('CHEMERA_AD_MEDIA_KEY'))
+        buildConfigField "String", "AD_SPACE_ID", quoted(envStr('CHEMERA_AD_SPACE_ID'))
+        buildConfigField "String", "TAPTAP_APP_ID", quoted(envStr('CHEMERA_TAPTAP_CLIENT_ID'))
+        // 构建产物里到底带没带广告 SDK，运行期日志与 android-check.sh 都按这个布尔判断，
+        // 不看文件是否存在（assets 会被打包工具改名）。
+        buildConfigField "boolean", "AD_SDK_BUNDLED", adAar ? 'true' : 'false'
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+
+    buildFeatures {
+        // AGP 8 起 BuildConfig 默认关闭，而上面那几个字段是 SDK 初始化的唯一入口。
+        buildConfig true
+    }
+
+    signingConfigs {
+        // 只在环境变量齐全时才生成 release 签名配置；缺任何一项就退回"不签名"，
+        // 让 android-check.sh 明确报"未签名"，而不是构建期报一个看不懂的 keystore 文件不存在。
+        if (envStr('CHEMERA_KEYSTORE_PATH') && envStr('CHEMERA_KEYSTORE_PASS')
+                && envStr('CHEMERA_KEY_ALIAS') && envStr('CHEMERA_KEY_PASS')) {
+            release {
+                storeFile file(envStr('CHEMERA_KEYSTORE_PATH'))
+                storePassword envStr('CHEMERA_KEYSTORE_PASS')
+                keyAlias envStr('CHEMERA_KEY_ALIAS')
+                keyPassword envStr('CHEMERA_KEY_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (envStr('CHEMERA_KEYSTORE_PATH') && envStr('CHEMERA_KEYSTORE_PASS')
+                    && envStr('CHEMERA_KEY_ALIAS') && envStr('CHEMERA_KEY_PASS')) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            // debug 包也用同一个 applicationId：TapTap 的测试包/正式包靠签名区分，不靠包名后缀，
+            // 加了后缀就等于测试期建立的账号档案和正式档不是同一个应用。
+            versionNameSuffix '-debug'
+        }
+    }
+
+    sourceSets {
+        // tapadn 源集**永远参与编译**（F4 的第 5 处）：以前"没 AAR 就不编译"，代价是那个目录里的代码
+        // javac 从来没看过——复查时在里面发现了一个引用未定义变量 appId 的编译错误，它一直没炸
+        // 只因为没人编译过它，而它会在拿到 AAR 那次构建当场炸掉（也就是提审前）。
+        // 现在没 AAR 时对着 tapsdk-stub 那份编译期桩编，签名对不上就立刻报错。
+        main {
+            java.srcDirs += 'src/tapadn/java'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+    // TapADN 的 AAR 走本地 flatDir，但它的传递依赖（okhttp 等）仍要从仓库拿。
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+
+    if (adAar) {
+        implementation fileTree(dir: 'libs', include: ['*.aar'])
+        // 文档指定的版本；本机 gradle 缓存里是 4.12.0。若接入后出现 okhttp 版本冲突，
+        // 以 SDK 编译时用的那份为准（这是广告面的唯一硬约束）。
+        implementation 'com.squareup.okhttp3:okhttp:3.12.1'
+    } else {
+        // 没有真实 AAR 也要让 src/tapadn/java 被 javac 看一遍：这份桩与真实 SDK 同名同类，
+        // 签名对不上就当场报错。
+        // 关键是 compileOnly 而不是 implementation——桩只该存在于编译期：
+        //   • 打进包就等于 dex 里出现 com/tapsdk/**，android-check.sh ③ 会把"没带 SDK"的包判成"带了 SDK"，
+        //     而这条判断是提审前决定"能不能投激励视频"的依据（BuildConfig 那个布尔又不在 dex 里可查）；
+        //   • 运行期也真的不需要它：Providers 在 AD_SDK_BUNDLED=false 时直接返回 null，
+        //     连 Class.forName 都不做，所以不会有 NoClassDefFoundError 这条路。
+        compileOnly project(':tapsdk-stub')
+    }
+}
+
+apply from: 'capacitor.build.gradle'
+// 把 js/app-config.js 里的 API 地址按构建环境覆写到 assets/public（详见该文件注释）
+apply from: rootProject.file('app-config.gradle')
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

@@ -1,0 +1,60 @@
+// 生成 app/src/main/assets/public/js/app-config.js —— APK 唯一的"后端地址"注入点。
+//
+// 为什么在构建期改文件，而不是让壳在 WebView 启动前注入一段 JS：
+// Capacitor 把 webDir 整目录拷进 assets/public，前端在 cloud.js 之前就加载这个文件
+// （index.html 里它就是第一句），所以覆写这一份既能随包生效，又不用改前端源码、
+// 不用依赖原生在首屏前抢先执行脚本（那条路在 WebView 就绪时机上不稳）。
+//
+// 地址从环境变量来（CHEMERA_API_BASE），和 server/.env 里那些口令同一套规矩：
+// 提交文件里永远只留模板（空串 = 同源），带域名的那份是构建产物、已被 .gitignore 挡住在
+// app/src/main/assets/public 整目录之下。
+
+/** 发布包的硬门：必须是 https 的绝对地址，且不能是 localhost。 */
+def releaseTasks = gradle.startParameter.taskNames.any {
+    String.valueOf(it).toLowerCase().contains('release') || String.valueOf(it).toLowerCase().contains('bundle')
+}
+def rawBase = String.valueOf(System.getenv('CHEMERA_API_BASE') ?: '').trim()
+def base = rawBase.replaceAll('/+$', '')
+
+tasks.register('generateAppConfig') {
+    group = 'chemera'
+    description = '用构建环境变量覆写 APK 里的 API 基址（CHEMERA_API_BASE）'
+
+    doLast {
+        def target = file('src/main/assets/public/js/app-config.js')
+        if (!target.exists()) {
+            throw new GradleException(
+                '缺 ' + target + '。先跑 npx cap sync android 把 frontend/ 拷进壳里再来构建。')
+        }
+
+        if (base) {
+            if (!base.startsWith('https://')) {
+                throw new GradleException('CHEMERA_API_BASE 必须是 https 绝对地址（现在是「' + rawBase + '」）。'
+                    + '壳的 origin 是 https://localhost，配 http 会被当混合内容拦掉。')
+            }
+            if (base.contains('localhost') || base.contains('127.0.0.1')) {
+                throw new GradleException('CHEMERA_API_BASE 指向了本机（「' + base + '」）。'
+                    + 'APK 里的 localhost 是壳自己，不是后端；真机连开发机请填局域网 IP 或正式域名。')
+            }
+        } else if (releaseTasks) {
+            throw new GradleException('发布包必须带 CHEMERA_API_BASE（现在是空的）。'
+                + '留空只适合 debug 包在模拟器里连开发机，带进 TapTap 就是打开即"网络错误"。')
+        }
+
+        // 空地址时写回模板等价内容：壳里 shell.js 的 apiBase() 会打一次配置缺失告警，
+        // 启动页据此说清"后端地址未配置"，比让玩家看到莫名的网络失败好。
+        def value = base ? '"' + base + '"' : '""'
+        target.text = """/* 构建期生成，请勿手工编辑，也请勿提交（在 .gitignore 里的 assets/public 下）。
+   生成时间：${new Date()}
+   来源：构建环境变量 CHEMERA_API_BASE（${base ? '已注入' : '未设置 → 回退同源，仅调试用'}）
+   前端在 cloud.js 之前加载本文件；改地址属于构建参数，不是代码改动。 */
+(function () {
+  "use strict";
+  window.CHEM_API_BASE = ${value};
+})();
+"""
+        logger.lifecycle("[chemera] app-config.js API base = " + (base ? base : '(同源/未配置)'))
+    }
+}
+
+preBuild.dependsOn 'generateAppConfig'

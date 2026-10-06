@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="false">
+
+        <!--
+          allowBackup=false：登录令牌就存在这个应用的私有目录里（Capacitor Preferences →
+          SharedPreferences），开了备份等于把令牌交给 adb backup / 云备份，而"换机恢复"这种便利
+          对我们没有价值——换设备重新登录即可，进度在服务端。
+          usesCleartextTraffic=false：壳的 origin 是 https，API 也必须是 https（app-config.gradle
+          会在构建期把这条要求钉死），所以没有任何场景需要明文。
+          enableOnBackInvokedCallback=false：返回键要先问前端"这一层我能不能消化"，那是一次异步问答，
+           predictive back 的动画却要求当场给出结论。宁可退回旧路径，也不要"动画做完了才决定拦住"。
+        -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+    </application>
+
+    <!--
+      游戏本体只要 INTERNET 这一条权限：没有存储、没有电话状态、没有位置。
+      接了 TapADN 的 AAR 之后，它自己的清单会被 manifest merge 带进来若干条（READ_PHONE_STATE 等），
+      那是广告网络的采集面，必须如实写进隐私政策（cloud.js 的政策里已经写了"广告 SDK 可能使用其自身的设备标识"），
+      上线前用 aapt2/xlsxml 复核一次最终权限表，与政策文字逐条对齐 —— 这一步是审核 5.8 的内容，不是形式。
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

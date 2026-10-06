@@ -1,0 +1,21 @@
+{
+  "name": "chemera-android-shell",
+  "version": "1.0.0",
+  "private": true,
+  "description": "化学实验室：元素纪元 —— 安卓壳（Capacitor + 自研原生插件）",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "apk": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

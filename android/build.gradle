@@ -1,0 +1,48 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'com.google.gms:google-services:4.4.4'
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+apply from: "variables.gradle"
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+/*
+ * Capacitor 的库模块（:capacitor-android、cordova 桥、以及各插件工程）自己不写 buildToolsVersion，
+ * 于是 AGP 8.13 会按它的默认值 35.0.0 去找；这台机器的 SDK 里只有 36.1.0 / 37.0.0，
+ * 而 gradle.properties 里已经关掉了 SDK 自动下载（构建期不该联网补组件），结果就是
+ * "Failed to find Build Tools revision 35.0.0"。app 模块在 variables.gradle 里钉过了，
+ * 这里把同一个值钉给所有 android 库模块，让整棵工程树只用本机实际存在的那份 aapt2。
+ * 换机器时只需要改 variables.gradle 的 buildToolsVersion，不用碰这里。
+ */
+subprojects { sp ->
+    ['com.android.library', 'com.android.dynamic-feature'].each { id ->
+        sp.plugins.withId(id) {
+            def ext = sp.extensions.findByName('android')
+            if (ext != null) {
+                ext.buildToolsVersion = rootProject.ext.buildToolsVersion
+            }
+        }
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

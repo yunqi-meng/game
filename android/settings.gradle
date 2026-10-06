@@ -1,0 +1,9 @@
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+
+// TapSDK/TapADN 的编译期桩：让 app/src/tapadn/java 在没有本地 AAR 时也被 javac 编到（见该模块 build.gradle）。
+include ':tapsdk-stub'
+project(':tapsdk-stub').projectDir = new File('./tapsdk-stub/')
+
+apply from: 'capacitor.settings.gradle'

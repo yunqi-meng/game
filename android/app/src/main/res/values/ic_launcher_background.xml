@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 tools/gen-android-icons.ps1 同步：与前端皮肤的深色底同值，
+     否则圆角或圆形蒙版下会露出一圈与图标不符的白边。
+     （注意：XML 注释里不能出现连续两个减号，所以这里不写变量名。） -->
+<resources>
+    <color name="ic_launcher_background">#0F2C4D</color>
+</resources>

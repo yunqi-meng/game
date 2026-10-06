@@ -1,0 +1,42 @@
+apply plugin: 'com.android.library'
+
+/**
+ * TapSDK / TapADN 的**编译期桩**（不是真实 SDK，也不是 mock 测试替身）。
+ *
+ * <p>为什么要有这个模块：广告与登录的 provider 实现（app/src/tapadn/java）引用的是
+ * com.tapsdk.* 的类，而那些类只存在于平台发给我们的本地 AAR 里（分发方式决定了它进不了仓库）。
+ * 于是历史上 tapadn 源集"没有 AAR 就不参与编译"——听起来干净，实际后果是
+ * **那个目录里的代码在绝大多数构建里根本没被 javac 看过**：F4 复查时在里面发现了一个
+ * 引用未定义变量 appId 的编译错误，它一直没炸，只因为没人编译过它。等 AAR 真的放进来那天，
+ * 它会在提审前的第一次构建里当场炸掉。
+ *
+ * <p>这个桩把那条"看不见"的通道变成"看得见"：app 模块在没有 AAR 时依赖它，
+ * tapadn 源集因此永远参与编译，SDK 签名对不上会立刻在这里报错——报错的位置就是改的地方。
+ * 桩的每个方法都明确抛"未内置"，绝不静默返回成功：运行期也拿不到假的奖励或假的票据。
+ * （Providers 在 BuildConfig.AD_SDK_BUNDLED=false 时根本不会去 Class.forName，
+ *  所以这一层抛错只是最后一道保险，正常路径是插件直接回 NO_SDK。）
+ *
+ * <p>放进来真实 AAR 后 app 不再依赖本模块（见 app/build.gradle 的 adAar 开关），
+ * 同名类只有一份在 classpath 上，签名以平台那份为准；本模块于是退化成"没用到的库"。
+ *
+ * <p>app 侧的依赖类型是 <b>compileOnly</b>：桩必须只活到编译期。它是 implementation 的话，
+ * 字节码会进 dex，而"包里有没有真 SDK"这件事在包外部只能靠 dex 里那几个类名判断（BuildConfig 的布尔
+ * 是编译期内联常量，扫不出来），于是自检会把没带 SDK 的包读成带了。探针类
+ * {@code com.tapsdk.ChemeraCompileOnlyStub} 就是这条约定的看守，理由见它自己的注释。
+ */
+android {
+    namespace = "com.chemera.tapsdkstub"
+    compileSdk = rootProject.ext.compileSdkVersion
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+
+    defaultConfig {
+        minSdkVersion rootProject.ext.minSdkVersion
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    lint { abortOnError false }
+}
