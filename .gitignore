@@ -6,6 +6,7 @@ server/target/
 # 运行时产物
 *.log
 server/boot.log
+server/logs/
 
 # 本地密钥/环境（真实凭证只走本地 .env，绝不提交）
 .env
@@ -24,3 +25,16 @@ desktop.ini
 
 # 数据库快照（含玩家数据，绝不入库）
 /backups/
+
+# 后台产物对账用的临时构建目录（test/admin-dist-check.sh，跑完即删）
+admin/.dist-check/
+
+# android-check.sh 第⑥项：从 APK 里导出的 CSS，只为跑 css-guard，判完即删
+test/.apk-style.css
+
+# android-check.sh 0b：为跑 dexdump 临时解出的 classes*.dex 与类清单，判完即删
+test/.apk-check/
+
+# 共享黄金向量表（H1）的中间产物：mvn -Dgolden.dump=true 写出、node test/golden/run.js --merge 吃掉。
+# 留着它会被下一次 merge 再吃一遍——等于把上一轮的旧结算当成这一轮的对表结果。
+test/golden/java-dump.json
