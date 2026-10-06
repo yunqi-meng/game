@@ -73,7 +73,7 @@ class AuthServiceRefreshTest {
         verify(sessions).rotate(anyString());               // 用过的立即作废
         verify(sessions, never()).revoke(anyString());
         verify(sessions, never()).revokeAll(anyLong());
-        verify(sessions).insert(eq(7L), anyString(), anyString(), any());
+        verify(sessions).insert(sessionRow(7L, "web"));
         assertNotEquals("old-token", out.get("refresh"));
         assertNotNull(out.get("token"));
     }
@@ -85,7 +85,7 @@ class AuthServiceRefreshTest {
         BizException e = assertThrows(BizException.class, () -> auth.refresh("stolen-token"));
         assertEquals(401, e.code);
         verify(sessions).revokeAll(7L);                     // 泄露处置：整户下线
-        verify(sessions, never()).insert(anyLong(), anyString(), anyString(), any());
+        verify(sessions, never()).insert(any(UserSession.class));
     }
 
     @Test
@@ -94,7 +94,7 @@ class AuthServiceRefreshTest {
 
         assertDoesNotThrow(() -> auth.refresh("second-tab-token"));
         verify(sessions, never()).revokeAll(anyLong());
-        verify(sessions).insert(anyLong(), anyString(), anyString(), any());
+        verify(sessions).insert(any(UserSession.class));
     }
 
     /** 退出/改密/注销留下的硬撤销行，绝不能再换出新令牌。 */
@@ -104,7 +104,7 @@ class AuthServiceRefreshTest {
 
         BizException e = assertThrows(BizException.class, () -> auth.refresh("logged-out-token"));
         assertTrue(e.getMessage().contains("注销"), e.getMessage());
-        verify(sessions, never()).insert(anyLong(), anyString(), anyString(), any());
+        verify(sessions, never()).insert(any(UserSession.class));
         verify(sessions, never()).revokeAll(anyLong());
     }
 
@@ -115,7 +115,7 @@ class AuthServiceRefreshTest {
         BizException e = assertThrows(BizException.class, () -> auth.refresh("dead-token"));
         assertTrue(e.getMessage().contains("过期"), e.getMessage());
         verify(sessions, never()).revokeAll(anyLong());
-        verify(sessions, never()).insert(anyLong(), anyString(), anyString(), any());
+        verify(sessions, never()).insert(any(UserSession.class));
     }
 
     @Test
@@ -189,7 +189,16 @@ class AuthServiceRefreshTest {
 
         assertEquals("alice", out.get("user"));
         assertEquals(Boolean.FALSE, out.get("guest"));
-        verify(sessions).insert(eq(7L), anyString(), eq("web"), any());
+        verify(sessions).insert(sessionRow(7L, "web"));
         verify(users).touchLogin(7L);
+    }
+
+    /**
+     * 会话行断言：A6 之后 {@code insert} 收的是实体（自增主键要回填成令牌里的 sid），
+     * 所以这里按字段匹配，而不是继续传四个散参数。uid + device 是这两组用例真正在意的两件事。
+     */
+    private static UserSession sessionRow(long uid, String device) {
+        return org.mockito.ArgumentMatchers.argThat(s -> s != null && s.getUserId() != null
+                && s.getUserId() == uid && device.equals(s.getDevice()));
     }
 }

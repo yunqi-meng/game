@@ -6,9 +6,26 @@ import java.time.LocalDateTime;
 
 @Mapper
 public interface SessionMapper {
-    @Insert("INSERT INTO user_session(user_id,refresh_hash,device,expires_at) VALUES(#{userId},#{hash},#{device},#{exp})")
-    int insert(@Param("userId") long userId, @Param("hash") String refreshHash,
-               @Param("device") String device, @Param("exp") LocalDateTime exp);
+    /**
+     * 插入一行登录态并把自增主键回填到 {@code s.id}（A6 的锚点：访问令牌里的 sid 就是它）。
+     *
+     * <p>之所以从四个散参数改成传实体：{@code useGeneratedKeys} 需要一个能被写回 key 的参数对象，
+     * 散参数没地方接。顺带也让"这一行对应哪个会话"这件事在调用点可见，而不是靠 insert 的返回值猜。
+     */
+    @Insert("INSERT INTO user_session(user_id,refresh_hash,device,expires_at)"
+            + " VALUES(#{userId},#{refreshHash},#{device},#{expiresAt})")
+    @Options(useGeneratedKeys = true, keyProperty = "id", keyColumn = "id")
+    int insert(UserSession s);
+
+    /**
+     * 这一次登录还活着吗：访问令牌校验用的每请求一问（主键 + 用户号，成本与后台侧回查同量级）。
+     *
+     * <p>{@code rotated_at IS NULL} 是刻意的：轮换掉的会话即便还在 15 秒宽限期内，也不该再让旧访问令牌
+     * 继续通行——宽限期是给"刷新令牌几乎同时到"的多标签页留的，不是给旧会话续命留的。
+     */
+    @Select("SELECT COUNT(*) FROM user_session WHERE id=#{sid} AND user_id=#{uid}"
+            + " AND revoked_at IS NULL AND rotated_at IS NULL AND expires_at>NOW()")
+    int liveCount(@Param("sid") long sid, @Param("uid") long uid);
 
     /** 轮换/重用判定要看 revoked_at 与 rotated_at，所以不能只查有效行。 */
     @Select("SELECT * FROM user_session WHERE refresh_hash=#{hash} ORDER BY id DESC LIMIT 1")

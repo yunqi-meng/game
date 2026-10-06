@@ -25,11 +25,18 @@ public class GameController {
         return ApiResponse.ok(game.state(AuthContext.uid(req)));
     }
 
-    /** 通用意图端点：intent 形如 react / bench.place / market.buy / sign …；body 为该意图的参数对象。 */
+    /**
+     * 通用意图端点：intent 形如 react / bench.place / market.buy / sign …；body 为该意图的参数对象。
+     *
+     * <p>参数对象里可以带一个保留键 {@code seq}（客户端每次发意图自增一），配合令牌里的 {@code sid}
+     * 构成幂等键 {@code (uid, sid, seq)}：弱网重发的那一句不会结算第二遍。老安装包不发这个键，
+     * 服务端按"只交付一次"处理，行为与本条落地之前一致。见 {@link com.chemera.server.game.IntentDedupe}。
+     */
     @PostMapping("/{intent}")
     public ApiResponse<Map<String, Object>> act(@PathVariable String intent,
                                                 @RequestBody(required = false) Map<String, Object> params,
                                                 HttpServletRequest req) {
-        return ApiResponse.ok(game.act(AuthContext.uid(req), intent, params == null ? Map.of() : params));
+        return ApiResponse.ok(game.act(AuthContext.uid(req), AuthContext.sid(req),
+                intent, params == null ? Map.of() : params));
     }
 }

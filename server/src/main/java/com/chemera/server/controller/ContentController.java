@@ -30,4 +30,11 @@ public class ContentController {
         Object v = content.bundle().get("version");
         return ApiResponse.ok(Map.of("version", v));
     }
+
+    /**
+     * 分片体检：每个内容类型有多少条、占多少字节。
+     * 只读、给运营与回归看"整包到底被谁撑大的"，不参与玩法；随包客户端不调它。
+     */
+    @GetMapping("/shards")
+    public ApiResponse<Map<String, Object>> shards() { return ApiResponse.ok(content.shards()); }
 }

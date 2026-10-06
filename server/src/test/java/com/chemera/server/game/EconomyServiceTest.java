@@ -179,29 +179,8 @@ class EconomyServiceTest {
         assertEquals(1, g.stats.quizOk);
     }
 
-    /* 9. 钻石商店与充值档位 */
-    @Test
-    void diamondShopAndRecharge() throws Exception {
-        ContentRegistry.Snapshot s = snap();
-        GameState g = fresh();
-        long now = System.currentTimeMillis();
-        // 提示次数礼包：先给足钻石
-        g.diamonds += 9999;
-        Map<String, Object> hint = eco.buyDiamondItem(g, s, "hint5", now);
-        assertEquals(true, hint.get("ok"), "购买提示次数");
-        assertEquals(5, g.hints);
-        // 去广告幂等
-        eco.buyDiamondItem(g, s, "noad", now);
-        assertTrue(g.noad);
-        assertEquals(false, eco.buyDiamondItem(g, s, "noad", now).get("ok"), "重复购买被拒");
-        // 充值档位
-        long d0 = g.diamonds;
-        int tiers = s.config.rechargeOr().size();
-        Map<String, Object> rc = eco.recharge(g, s, tiers - 1);
-        assertEquals(true, rc.get("ok"));
-        assertTrue(g.diamonds > d0, "充值到账");
-        assertEquals(false, eco.recharge(g, s, tiers + 5).get("ok"), "越界档位被拒");
-    }
+    /* 9. 钻石商店与充值：随付费面下线（原例见 git 之前版本）。
+       钻石的唯一来源改为激励视频，覆盖在 AdServiceTest；服务端拒绝旧意图的路径覆盖在 GameServiceTest。 */
 
     /* N. 双倍领取必须由看广告换来的当日券支付，防止广告与倍率叠加 */
     @Test

@@ -16,7 +16,17 @@ import java.util.function.DoubleSupplier;
 @Service
 public class GameEngine {
 
-    static final int MAX_LINES = 6;
+    /* 台位上限、等级曲线、事故参数以前是这里的常数（G4 之前的债）。
+       现在一律读 app_config：Content.Config.expNeeded / benchMaxLines / accidentOr，
+       真源与说明见 ConfigSpec，范围校验见 EngineConfigValidator。 */
+
+    /**
+     * 内容表里查不到的物质按这个价估值（H1）。客户端同名常数在 {@code engine.js} 的 {@code E.UNKNOWN_PRICE}，
+     * 成本预览与事故损失都必须走它——同一坨原料在预览里算 10、结算时被扣 20，玩家永远对不上账。
+     * 只有改包的存档或"客户端基线落后于服务端内容"才会走到这条分支，所以它由 {@code test/golden/run.js}
+     * 静态比对两个源文件的取值，而不是靠人记得同步。
+     */
+    static final int UNKNOWN_PRICE = 20;
 
     /* ================= 结果对象 ================= */
     public static final class Result {
@@ -64,6 +74,8 @@ public class GameEngine {
         boolean elec() { return r != null && r.cond().elec(); }
         List<String> instruments() { return r != null ? r.instrumentOr() : List.of(p.vessel()); }
         String type() { return r != null ? r.type() : p.type(); }
+        /** 方程式文本：客户端预览里就是这一行字，{@code GoldenVectorsTest} 拿它和 vectors.json 对表（H1）。 */
+        String eq() { return r != null ? r.eq() : p.eq(); }
         List<String> fx() { return r != null ? r.fxOr() : p.fxOr(); }
         int lv() { return r != null ? r.lv() : 1; }   // 工艺视同 discoverLv=1
         int exp() { return r != null ? r.expOr() : p.expOr(); }
@@ -179,12 +191,41 @@ public class GameEngine {
         return null;
     }
 
+    /**
+     * 从候选里选一条真正结算的方程式（H1）。规则与 {@code engine.js} 的 {@code E.pick} 逐字对齐：
+     * 工艺优先（它排在 candidates[0]）→ 优先"刚好把台面消耗干净"的 → 反应物种数多的 → discoverLv 小的。
+     *
+     * <p>以前客户端拿 {@code matches()[0]} 当预览、服务端按下面这套排序落账，于是台面上多放一种物质时
+     * 界面写着 A 式、进包的是 B 式；运营在后台调一下内容顺序，两侧还会各走各的。共享向量表就是为了让
+     * 这种分叉在第 1 层（node）和第 3 层（JUnit）同时红。
+     */
+    Candidate pick(List<Candidate> rs, Map<String, Integer> placed) {
+        if (rs.isEmpty()) return null;
+        if (rs.get(0).isProcess()) return rs.get(0);
+        List<Candidate> exact = new ArrayList<>();
+        for (Candidate x : rs) if (consumesExactly(x, placed)) exact.add(x);
+        List<Candidate> cand = exact.isEmpty() ? new ArrayList<>(rs) : exact;
+        if (!exact.isEmpty()) {
+            cand.sort((a, c) -> {
+                int d = Integer.compare(c.reactants().size(), a.reactants().size());
+                return d != 0 ? d : Integer.compare(a.lv(), c.lv());
+            });
+        } else {
+            cand.sort((a, c) -> Integer.compare(a.lv(), c.lv()));
+        }
+        return cand.get(0);
+    }
+
     int maxMultiplier(GameState g, ContentRegistry.Snapshot s, EngineCtx ctx, Candidate r) {
         GameState.Bench b = cur(g, ctx);
         int m = Integer.MAX_VALUE;
         int cap = batchCap(g, s, ctx);
         for (Map.Entry<String, Integer> e : r.reactants().entrySet()) {
-            m = Math.min(m, b.placed.getOrDefault(e.getKey(), 0) / e.getValue());
+            int need = e.getValue() == null ? 0 : e.getValue();
+            // 系数 ≤0 的这一项不参与限流：它根本不消耗，而拿它做除法是 ArithmeticException——
+            // 客户端（engine.js maxMultiplier）那边同一条跳过规则，两边必须一致（H1）。
+            if (need <= 0) continue;
+            m = Math.min(m, b.placed.getOrDefault(e.getKey(), 0) / need);
         }
         return Math.max(1, Math.min(m == Integer.MAX_VALUE ? 1 : m, cap));
     }
@@ -232,8 +273,9 @@ public class GameEngine {
     PlaceResult place(GameState g, ContentRegistry.Snapshot s, EngineCtx ctx, DoubleSupplier rng, String id, int n) {
         GameState.Bench b = cur(g, ctx);
         if (n <= 0) n = 1;
-        if (b.placed.size() >= MAX_LINES && !b.placed.containsKey(id)) {
-            return PlaceResult.fail("容器最多容纳 " + MAX_LINES + " 种物质");
+        int maxLines = s.config.benchMaxLines();
+        if (b.placed.size() >= maxLines && !b.placed.containsKey(id)) {
+            return PlaceResult.fail("容器最多容纳 " + maxLines + " 种物质");
         }
         if (ctx.tempBench != null && g.chal != null && !g.chal.win) return placeChal(g, ctx, id, n);
         if (ctx.sandboxActive) { b.placed.merge(id, n, Integer::sum); return PlaceResult.ok(); }
@@ -323,9 +365,12 @@ public class GameEngine {
         List<Candidate> rs = matches(g, s, ctx);
         Content.DangerDef danger = rollDanger(s, b.placed);
         int safety = g.lab.safety;
-        Env env = yieldEnv(g, s, ctx, rs.isEmpty() ? null : rs.get(0));
+        /* 危险滚动发生在选出方程式之前，所以这里只取"事故减免"那一半（它与候选无关）；
+           产率加成必须等 pick 定了再算，否则拿"列表第一条"的反应类型去加成立方厘米的加成，
+           结算的却是另一条——客户端看不到这个数，只有对账时才发现产率莫名其妙。 */
+        Env env = yieldEnv(g, s, ctx, null);
 
-        if (danger != null && (rs.isEmpty() || rng.getAsDouble() < Math.max(0.05, 0.3 - safety * 0.04 - env.accidentReduce))) {
+        if (danger != null && (rs.isEmpty() || rng.getAsDouble() < s.config.accidentOr().dangerChance(safety, env.accidentReduce))) {
             String m = danger.msg() != null ? danger.msg() : "混合发生危险反应！";
             return boom(g, s, ctx, m, b);
         }
@@ -344,24 +389,9 @@ public class GameEngine {
             return boom(g, s, ctx, "物质无法反应，生成一坨废渣……", b);
         }
 
-        Candidate pick;
-        boolean proc = rs.get(0).isProcess();
-        if (proc) {
-            pick = rs.get(0);
-        } else {
-            List<Candidate> exact = new ArrayList<>();
-            for (Candidate x : rs) if (consumesExactly(x, b.placed)) exact.add(x);
-            List<Candidate> cand = exact.isEmpty() ? new ArrayList<>(rs) : exact;
-            if (!exact.isEmpty()) {
-                cand.sort((a, c) -> {
-                    int d = Integer.compare(c.reactants().size(), a.reactants().size());
-                    return d != 0 ? d : Integer.compare(a.lv(), c.lv());
-                });
-            } else {
-                cand.sort((a, c) -> Integer.compare(a.lv(), c.lv()));
-            }
-            pick = cand.get(0);
-        }
+        Candidate pick = pick(rs, b.placed);
+        boolean proc = pick.isProcess();
+        env = yieldEnv(g, s, ctx, pick);
         Content.ProcessDef pd = proc ? pick.p : null;
         res.reaction = proc ? null : pick.r;
         res.proc = pd;
@@ -413,16 +443,17 @@ public class GameEngine {
             g.coins += eqBonus;
         }
         res.exp = expGain; res.eqBonus = eqBonus;
-        int ups = ctx.sandboxActive ? 0 : addExp(g, expGain);
+        int ups = ctx.sandboxActive ? 0 : addExp(g, s, expGain);
         res.ups = ups;
         if (ctx.sandboxActive) { g.stats.sandbox++; }
         else { g.stats.success++; dailyEvent(g, "success", 1); }
         checkAch(g, s);
 
         String partialMsg = null;
+        Content.Accident acc = s.config.accidentOr();
         if ((pick.hazard() || pick.danger()) && !ctx.sandboxActive
-                && rng.getAsDouble() < Math.max(0.08, 0.5 - safety * 0.1 - env.accidentReduce)) {
-            long fee = Math.min(g.coins, 100 + (long) (pick.exp() != 0 ? pick.exp() : 10) * 2);
+                && rng.getAsDouble() < acc.hitChance(safety, env.accidentReduce)) {
+            long fee = acc.repairFee(pick.exp(), g.coins);
             g.coins -= fee;
             partialMsg = "反应成功，但装置受到冲击！支付修复费 " + fee + " 金币";
         }
@@ -434,7 +465,7 @@ public class GameEngine {
             ChalResult chalRes = null;
             if (produced.getOrDefault(ch.target, 0) > 0) {
                 ch.win = true;
-                g.coins += ch.reward; g.stats.challenges++; addExp(g, 60);
+                g.coins += ch.reward; g.stats.challenges++; addExp(g, s, 60);
                 chalRes = new ChalResult(true); chalRes.reward = ch.reward; chalRes.target = ch.target;
             } else if (ch.steps >= ch.max) {
                 ch.failed = true;
@@ -475,19 +506,20 @@ public class GameEngine {
         long loss = 0;
         for (Map.Entry<String, Integer> e : b.placed.entrySet()) {
             Content.Substance sub = s.substance(e.getKey());
-            loss += (long) (sub != null ? sub.price() : 20) * e.getValue();
+            loss += (long) (sub != null ? sub.price() : UNKNOWN_PRICE) * e.getValue();
         }
         int safety = g.lab.safety;
-        long dmg = Math.round(loss * (0.9 - safety * 0.12) * 0.5);
+        Content.Accident acc = s.config.accidentOr();
+        long dmg = acc.damage(loss, safety);
         String out = msg;
         if (count(g, "protectormask", 0) > 0 && dmg > 0) {
             takeItem(g, "protectormask", 1, 0);
-            dmg = Math.round(dmg * 0.2);
+            dmg = acc.absorbed(dmg);
             out += "（防护罩吸收了大部分冲击！）";
         }
         long refund = 0;
         if (ctx.insured) {
-            refund = Math.round(loss * 0.5);
+            refund = acc.refund(loss);
             ctx.insured = false;
             out += "（实验保险理赔 🪙" + refund + "）";
         }
@@ -583,10 +615,11 @@ public class GameEngine {
         return v != null && v.owned;
     }
 
-    int addExp(GameState g, int n) {
+    int addExp(GameState g, ContentRegistry.Snapshot s, int n) {
         g.exp += n;
         int ups = 0;
-        while (g.exp >= Content.levelExp(g.level)) { g.exp -= Content.levelExp(g.level); g.level++; ups++; }
+        // 曲线读 app_config.level_exp（Content.Config.expNeeded），单次循环所需经验恒 ≥1，不会转不出来。
+        while (g.exp >= s.config.expNeeded(g.level)) { g.exp -= s.config.expNeeded(g.level); g.level++; ups++; }
         return ups;
     }
 
@@ -597,8 +630,8 @@ public class GameEngine {
     void onDiscover(GameState g, ContentRegistry.Snapshot s, String id) {
         Content.Substance sub = s.substance(id);
         if (sub == null || "consumable".equals(sub.kind())) return;   // 耗材不计发现
-        long bonus = sub.level() >= 1 ? discoverBonus(g, s, id, false) : 50;
-        g.coins += bonus;
+        // 发现奖金只有一条算法（含"单质定额 50"那档），见 discoverBonus——以前这里是第二份判断。
+        g.coins += discoverBonus(g, s, id, false);
         dailyEvent(g, "discover", 1);
         checkAch(g, s);
     }
@@ -606,7 +639,12 @@ public class GameEngine {
     long discoverBonus(GameState g, ContentRegistry.Snapshot s, String id, boolean forReaction) {
         Content.Substance sub = s.substance(id);
         if (sub == null) return 0;
-        int lv = Math.max(1, sub.level());
+        /* 单质与耗材（level<1）没有"新奇感溢价"：定额 50，反应奖金折半 25。
+           这条规则以前只写在 onDiscover 里，而 eqBonus 那条路直接调本方法、按 level 1 的区间发钱，
+           同一种物质在两个入口值不同的金币（H1 对表时抓出来的第四处分叉）。
+           现在规则住在本方法里，两个入口共用一份，客户端 state.js 的 discoverBonus 同写法。 */
+        if (sub.level() < 1) return forReaction ? 25 : 50;
+        int lv = sub.level();
         int[] r = s.config.discoverBonus(lv);
         double v = r[0] + (r[1] - r[0]) * Math.abs(hash(id));
         v = Math.round(v / 10.0) * 10;
@@ -629,34 +667,23 @@ public class GameEngine {
     List<String> checkAch(GameState g, ContentRegistry.Snapshot s) {
         List<String> done = new ArrayList<>();
         for (Content.AchievementDef a : s.achievements) {
-            if (!Boolean.TRUE.equals(g.achClaimed.get(a.id())) && achDone(g, a.id())) done.add(a.id());
+            if (!Boolean.TRUE.equals(g.achClaimed.get(a.id())) && achDone(g, a)) done.add(a.id());
         }
         return done;
     }
 
-    boolean achDone(GameState g, String id) {
-        int disc = g.discovered.size();
-        switch (id) {
-            case "aFirst": return g.stats.success >= 1;
-            case "aWater": return g.discovered.containsKey("H2O");
-            case "aGold": return g.discovered.containsKey("Au");
-            case "aBoom": return g.stats.boom >= 1;
-            case "aS100": return g.stats.success >= 100;
-            case "aD20": return disc >= 20;
-            case "aD80": return disc >= 80;
-            case "aD200": return disc >= 200;
-            case "aEq30": return g.reactionsKnown.size() >= 30;
-            case "aLv10": return g.level >= 10;
-            case "aLv20": return g.level >= 20;
-            case "aRich": return g.coins >= 50000;
-            case "aOrganic": return g.discovered.containsKey("CH3COOC2H5");
-            case "aAqua": return g.discovered.containsKey("aqua_regia");
-            case "aQuiz50": return g.stats.quizOk >= 50;
-            case "aSnake": return Boolean.TRUE.equals(g.reactionsKnown.get("R141"));
-            case "aRep": return g.rep >= 50;
-            case "aChallenge": return g.stats.challenges >= 1;
-            case "aSandbox": return g.stats.sandbox >= 5;
-            default: return false;
-        }
+    /**
+     * 成就判定（G4）：按行里的 {@code cond} 描述符求值，读得出来才算达成。
+     *
+     * <p>以前这里是 19 路 {@code switch (id)}——后台新增一行成就、不动这段 Java 就永远判未达成，
+     * 而面板上看不出任何异常。现在条件是数据；只有<b>没写条件的老行</b>才落到
+     * {@link AchievementRule#legacy} 的过渡白名单，白名单是兜底不是主路径（行里写了就以行为准，
+     * 运营调阈值当场生效）。解释器本身对读不出来的描述符返回 false 而不是抛错：判定在每帧结算的
+     * 热路径上，一条脏数据不该把玩家的实验打断，"这行能不能解释"交给写入校验与内容体检去回答。
+     */
+    boolean achDone(GameState g, Content.AchievementDef a) {
+        Content.AchCond c = a.cond();
+        if (c == null) c = AchievementRule.legacy(a.id());
+        return AchievementRule.done(g, c);
     }
 }

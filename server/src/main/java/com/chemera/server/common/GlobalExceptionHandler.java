@@ -24,9 +24,26 @@ public class GlobalExceptionHandler {
             case 403 -> HttpStatus.FORBIDDEN;
             case 404 -> HttpStatus.NOT_FOUND;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
+            // 乐观锁冲突（H6-2）必须是真状态码：面板按它分流到「载入最新」，按文案匹配的话，
+            // 改一个字就把两个运营互相覆盖写的那条防线拆掉了。
+            case 409 -> HttpStatus.CONFLICT;
             default -> HttpStatus.OK; // 业务错误用 200 + ok:false，便于客户端统一处理
         };
-        return ResponseEntity.status(hs).body(ApiResponse.err(e.code, e.getMessage()));
+        ApiResponse<Void> body = ApiResponse.err(e.code, e.getMessage());
+        if (e.tag != null) body.tagged(e.tag);
+        return ResponseEntity.status(hs).body(body);
+    }
+
+    /**
+     * 方法用错（路径对、动词不对）以前会落到下面的 {@code Exception → 500}：
+     * 客户端调错接口却收到 500，既误导排障也污染错误日志。A7 的第一块。
+     */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> wrongMethod(org.springframework.web.HttpRequestMethodNotSupportedException e,
+                                                         HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(ApiResponse.err(405, req.getMethod() + " 不被支持，这个接口只接受 "
+                        + java.util.Arrays.toString(e.getSupportedMethods())));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

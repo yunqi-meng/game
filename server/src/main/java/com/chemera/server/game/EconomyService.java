@@ -57,10 +57,19 @@ public class EconomyService {
 
     boolean monthlyActive(GameState g, long now) { return now < g.monthly.until; }
 
+    /**
+     * 买价：物质表里查不到的 id 直接给"买不起"哨兵值，不再乘声望与行情。
+     *
+     * <p>以前这里是 {@code sub == null ? 999999 : sub.price()} 然后照样往下乘，于是同一个不存在的 id
+     * 在服务端算出 1199999（×常客倍率再 ×漂移），而客户端 {@code state.js buyPrice} 那句
+     * {@code if (!s) return 999999} 是原样返回——共享向量表（H1）第一次跑就抓到这条。
+     * 实际买货路径在 {@link #buyMarket} 开头就以"商品不存在"挡掉了，所以这个数不该有第二种答案：
+     * 哨兵值的意思就是"哨兵值"，别把它当价格去加工。
+     */
     long buyPrice(GameState g, ContentRegistry.Snapshot s, String id, long now) {
         Content.Substance sub = s.substance(id);
-        double price = sub == null ? 999999 : sub.price();
-        return Math.max(1, Math.round(price * repTier(g, s).buyRate * drift(g, s, id, now)));
+        if (sub == null) return 999999;
+        return Math.max(1, Math.round(sub.price() * repTier(g, s).buyRate * drift(g, s, id, now)));
     }
 
     long sellPrice(GameState g, ContentRegistry.Snapshot s, String id, int q, long now) {
@@ -263,7 +272,7 @@ public class EconomyService {
     /* ================= 成就 / 任务 / 图鉴 领取 ================= */
     Map<String, Object> claimAch(GameState g, ContentRegistry.Snapshot s, String id, boolean dbl) {
         Content.AchievementDef a = s.achievement(id);
-        if (a == null || Boolean.TRUE.equals(g.achClaimed.get(id)) || !engine.achDone(g, id))
+        if (a == null || Boolean.TRUE.equals(g.achClaimed.get(id)) || !engine.achDone(g, a))
             return res("ok", false, "msg", "尚不可领取");
         g.achClaimed.put(id, true);
         boolean used = consumeDblCoupon(g, dbl);
@@ -500,41 +509,9 @@ public class EconomyService {
         return res("ok", true, "id", id);
     }
 
-    Map<String, Object> buyDiamondItem(GameState g, ContentRegistry.Snapshot s, String id, long now) {
-        Content.ShopDef item = null;
-        for (Content.ShopDef x : s.shop) if (x.id().equals(id)) item = x;
-        if (item == null) return res("ok", false, "msg", "商品不存在");
-        int cost = item.price();
-        if (g.diamonds < cost) return res("ok", false, "msg", "钻石不足");
-        if ("noad".equals(id) && g.noad) return res("ok", false, "msg", "已移除广告");
-        if ("elpack".equals(id) && g.packs.el) return res("ok", false, "msg", "已拥有该礼包");
-        g.diamonds -= cost;
-        switch (id) {
-            case "monthly": g.monthly.until = Math.max(now, g.monthly.until) + 30L * 86400000L; break;
-            case "elpack": g.packs.el = true; break;
-            case "noad": g.noad = true; break;
-            case "hint5": g.hints += 5; break;
-            default:
-                if (id.startsWith("skin_")) {
-                    String sk = id.substring(5);
-                    if (!g.skins.owned.contains(sk)) g.skins.owned.add(sk);
-                    g.skins.cur = sk;
-                }
-        }
-        return res("ok", true, "diamonds", g.diamonds);
-    }
-
-    Map<String, Object> recharge(GameState g, ContentRegistry.Snapshot s, int tier) {
-        List<Content.Recharge> rc = s.config.rechargeOr();
-        if (tier < 0 || tier >= rc.size()) return res("ok", false, "msg", "无此充值档位");
-        Content.Recharge r = rc.get(tier);
-        g.diamonds += r.d();
-        return res("ok", true, "gained", r.d(), "diamonds", g.diamonds);
-    }
-
     /* ================= 答题 ================= */
-    private static final Map<String, Double> GRADE_MULT =
-            Map.of("小学", 1.0, "初中", 1.0, "高中", 1.2, "大学", 1.5);
+    /* 年级倍率以前是这里的 GRADE_MULT 常数（G4 之前的债），现在读 app_config.quiz_grade_mult，
+       缺失时由 Content.Config.quizGradeMult 兜回同一份值。答对掉钻的概率仍写死见下（见 ConfigSpec 说明）。 */
 
     Content.QuizDef pickQuiz(GameState g, ContentRegistry.Snapshot s, String grade, DoubleSupplier rng) {
         List<Content.QuizDef> qs = new ArrayList<>();
@@ -554,7 +531,7 @@ public class EconomyService {
         long reward = 0; int dropD = 0;
         if (correct) {
             String grade = q.grade() == null ? "初中" : q.grade();
-            reward = Math.round(s.config.quizReward() * GRADE_MULT.getOrDefault(grade, 1.0));
+            reward = Math.round(s.config.quizReward() * s.config.quizGradeMult(grade));
             g.stats.quizOk++; engine.dailyEvent(g, "quiz", 1); g.coins += reward;
             double rate = "大学".equals(grade) ? 0.3 : "高中".equals(grade) ? 0.15 : 0.05;
             if (rng.getAsDouble() < rate) { dropD = 1; g.diamonds += 1; }

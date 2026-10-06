@@ -22,9 +22,21 @@ public class ContentRegistry {
     private volatile long cachedVersion = Long.MIN_VALUE;
     private volatile Snapshot cached;
 
+    /**
+     * 重建过几次内容快照。给 {@code IntentMetrics} 用：一次意图如果赶上重建，它就会多跑
+     * content_item / app_config 那几条 SELECT 把包重攒出来，那是运营动作（后台改了一次内容）
+     * 的代价，不是结算链自己的形状。预算那条尺子要能把两者分开，见 {@code IntentMetrics.record}。
+     */
+    private final java.util.concurrent.atomic.AtomicLong rebuilds = new java.util.concurrent.atomic.AtomicLong();
+
     public ContentRegistry(ContentService content, ObjectMapper om) {
         this.content = content;
         this.om = om;
+    }
+
+    /** 累计重建次数（单调递增）：拦截器在意图前后各读一次，不相等就说明这次带着重建。 */
+    public long rebuilds() {
+        return rebuilds.get();
     }
 
     /** 当前快照；content_version 变化时重建。 */
@@ -41,6 +53,7 @@ public class ContentRegistry {
             Snapshot s = build(v, c, cfgMap);
             cached = s;
             cachedVersion = v;
+            rebuilds.incrementAndGet();
             return s;
         }
     }

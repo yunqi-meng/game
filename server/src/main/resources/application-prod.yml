@@ -22,10 +22,35 @@ chemera:
     register-window-minutes: 60
     guest-max: 10
     guest-window-minutes: 60
+    taptap-max: 10
+    taptap-window-minutes: 60
+    # 广告回调：300 次/分钟 = 每小时 1.8 万次观看的回调量，远高于本作量级；
+    # 真被这一档限住（平台收到 429 会重试、工单仍是 issued），也应先查是不是有人在刷，而不是关掉闸门
+    ad-callback-max: 300
+    ad-callback-window-minutes: 1
     admin-max: 10
     admin-window-minutes: 60
     admin-fail-max: 5
     admin-lock-minutes: 60
+    # 举报防洪：一个玩家一天用不到 20 条，这一档挡的是拿单个 IP 把审核表灌满、
+    # 让真举报沉到分页第二页的那种人（G2 里 ReportService 的同人重复拦截只管同一条对象）。
+    # 收紧而非关闭：被判 429 的那条不会落库，玩家看到的是明确文案，不是"提交了但没反应"。
+    report-max: 20
+    report-window-minutes: 60
+  ad:
+    # 上线即封死自证通道：写死 false，环境变量也改不动（ProdHardening 再兜一层，检测到 dev-mode=true 直接拒绝启动）
+    dev-mode: false
+    # 验签口令缺失时 AdService 不签发工单，健康检查会把广告标记为未就绪，避免出现"点了广告没奖励"的静默故障
+    security-key: ${CHEMERA_AD_SECURITY_KEY:}
+    space-id: ${CHEMERA_AD_SPACE_ID:}
+    # 平台公布回调网段后把它填进来；留空=不限制（此时只有配额与验签在挡）。填错会挡死线上奖励，所以默认留空
+    callback-allow-ips: ${CHEMERA_AD_CALLBACK_IPS:}
+  taptap:
+    # 与广告同一套逻辑：自证票据一开，任何人都能凭 {"dev":"dev:我说了算"} 登进任何账号，绝不能带它上线
+    dev-mode: false
+    # 缺 client_id 时登录接口直接明确回"未配置"（不静默 401）；/api/healthz 里 taptap.ready=false
+    client-id: ${CHEMERA_TAPTAP_CLIENT_ID:}
+    host: ${CHEMERA_TAPTAP_HOST:open.tapapis.cn}
 
 server:
   # 反代之后的真实协议/IP 才可信（配合 trust-forwarded-for）

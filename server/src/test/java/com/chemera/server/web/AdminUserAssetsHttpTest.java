@@ -4,14 +4,15 @@ import com.chemera.server.common.BizException;
 import com.chemera.server.common.GlobalExceptionHandler;
 import com.chemera.server.controller.admin.AdminSupport;
 import com.chemera.server.controller.admin.AdminUserController;
+import com.chemera.server.game.CurfewGuard;
 import com.chemera.server.entity.AdminUser;
 import com.chemera.server.mapper.AdminMapper;
 import com.chemera.server.mapper.ContentMapper;
-import com.chemera.server.mapper.SaveMapper;
 import com.chemera.server.mapper.SessionMapper;
 import com.chemera.server.mapper.UserMapper;
 import com.chemera.server.security.AdminInterceptor;
 import com.chemera.server.security.JwtService;
+import com.chemera.server.service.AccountPurge;
 import com.chemera.server.service.AuditService;
 import com.chemera.server.service.AuthService;
 import com.chemera.server.service.ContentService;
@@ -52,8 +53,8 @@ class AdminUserAssetsHttpTest {
         audit = mock(AuditService.class);
         jwt = new JwtService("player-asset-http-layer-secret32b!", 60);
         AdminSupport support = new AdminSupport(mock(ContentMapper.class), mock(ContentService.class));
-        AdminUserController controller = new AdminUserController(mock(UserMapper.class), mock(SaveMapper.class),
-                mock(SaveService.class), assets, mock(SessionMapper.class), mock(AuthService.class), support, audit);
+        AdminUserController controller = new AdminUserController(mock(UserMapper.class),
+                mock(SaveService.class), assets, mock(SessionMapper.class), mock(AuthService.class), mock(AccountPurge.class), support, audit, mock(CurfewGuard.class));
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .addInterceptors(new AdminInterceptor(jwt, admins))

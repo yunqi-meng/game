@@ -42,11 +42,26 @@ public final class ContentSchema {
     public static final List<String> COMPOUND_STATE = List.of("solid", "liquid", "gas", "solution");
     public static final List<String> INSTR_KIND = List.of("vessel", "equipment");
     public static final List<String> INSTR_CAT = List.of("反应容器", "加热工具", "分离提纯", "计量仪器", "精密仪器", "辅助工具");
-    public static final List<String> QUIZ_GRADE = List.of("初中", "高中", "大学");
+    /**
+     * 题目年级闭集。G4 时补进"小学"：客户端答题页早就有小学这个筛选档
+     * （{@code frontend/js/panels.js} 的年级 tabs），而这里不放行的话运营根本写不出小学题目，
+     * {@code quiz_grade_mult} 里那档小学倍率就成了永远读不到的死配置。三处词表必须一致。
+     */
+    public static final List<String> QUIZ_GRADE = List.of("小学", "初中", "高中", "大学");
     /** 合法每日计数器名（引擎 dailyEvent 用到的键）。 */
     public static final List<String> TASK_KEYS = List.of("success", "discover", "trade", "quiz");
     /** 仪器关联工艺类别（instrument.proc 取值）。 */
     public static final List<String> PROC = List.of("filter", "distill");
+    /**
+     * 成就达成条件的指标与比较符（G4）。
+     *
+     * <p><b>真源不是这里，是 {@link AchievementRule}</b>：词表在引擎里只有一份，
+     * 下拉、闭集校验、解释执行读的都是它，所以"面板能选却判不出来"这种漂移不可能发生。
+     * 加一个可读指标 = 在 {@code AchievementRule.Metric} 加一个常量。
+     */
+    public static final List<String> ACH_METRIC = AchievementRule.Metric.names();
+    public static final List<String> ACH_OP =
+            java.util.Arrays.stream(AchievementRule.Op.values()).map(Enum::name).toList();
 
     public static final Map<String, List<Field>> SCHEMAS = build();
 
@@ -175,7 +190,14 @@ public final class ContentSchema {
                 Field.req("id", "成就ID", "text"),
                 Field.req("zh", "名称", "text"),
                 Field.of("desc", "描述", "textarea"),
-                Field.req("reward", "奖励金币", "int")));
+                Field.req("reward", "奖励金币", "int"),
+                // cond 整体可省（省下走 AchievementRule 的过渡白名单），但一旦写了就必须能被引擎念出来：
+                // 缺哪个、多哪个都由下面的 achievement 专属规则点名，不靠这里的 required 兜。
+                Field.obj("cond", "达成条件", List.of(
+                        new Field("metric", "指标", "enum", true, ACH_METRIC, null, List.of()),
+                        Field.of("subject", "对象(物质/方程式ID)", "text"),
+                        Field.en("op", "比较符", false, ACH_OP),
+                        Field.of("value", "目标值", "num")))));
 
         m.put("task", List.of(
                 Field.req("id", "任务ID", "text"),
@@ -204,7 +226,7 @@ public final class ContentSchema {
 
     /** 校验引用/枚举所需的存在域。由调用方从当前 {@link ContentRegistry.Snapshot} 组装。 */
     public record Sets(Set<String> substances, Set<String> instruments, Set<String> vessels,
-                       Set<String> processes, Set<String> elements) {
+                       Set<String> processes, Set<String> elements, Set<String> reactions) {
         boolean has(String ref, String id) {
             Set<String> s = switch (ref) {
                 case "substance" -> substances;
@@ -212,9 +234,41 @@ public final class ContentSchema {
                 case "vessel" -> vessels;
                 case "process" -> processes;
                 case "element" -> elements;
+                case "reaction" -> reactions;
                 default -> null;
             };
             return s == null || s.contains(id); // 未知 ref 目标不误伤
+        }
+
+        /**
+         * 可省略的引用：没写不报（成就条件里"缺对象"另有 {@code AchievementRule.problem} 的话要说），
+         * 写了就必须存在——顺带避开 {@code TreeSet.contains(null)} 的 NPE。
+         */
+        boolean presentRefMustExist(String ref, String id) {
+            return id == null || id.isBlank() || has(ref, id);
+        }
+
+        /**
+         * 从当前内容快照组装存在域。
+         *
+         * <p>放在这里而不是各调用方自己拼：写入校验、内容体检、单测三处必须用同一套存在域，
+         * 否则会出现"体检说没问题、保存却被拒"这类只能靠读代码解释的分裂。
+         */
+        public static Sets of(ContentRegistry.Snapshot s) {
+            var substances = new java.util.TreeSet<>(s.substances().keySet());
+            var instruments = new java.util.TreeSet<String>();
+            var vessels = new java.util.TreeSet<String>();
+            for (Content.InstrumentDef i : s.instruments) {
+                instruments.add(i.id());
+                if (i.isVessel()) vessels.add(i.id());
+            }
+            var processes = new java.util.TreeSet<String>();
+            s.processes.forEach(p -> processes.add(p.id()));
+            var elements = new java.util.TreeSet<String>();
+            s.elements.forEach(e -> elements.add(e.id()));
+            var reactions = new java.util.TreeSet<String>();
+            s.reactions.forEach(r -> reactions.add(r.id()));
+            return new Sets(substances, instruments, vessels, processes, elements, reactions);
         }
     }
 
@@ -230,7 +284,38 @@ public final class ContentSchema {
             Object a = data.get("a");
             if (a instanceof Number n && (n.intValue() < 0 || n.intValue() > 3)) errs.add("答案下标 a 需在 0-3");
         }
+        if ("achievement".equals(type)) {
+            Object id = data.get("id");
+            Content.AchCond c = condOf(data.get("cond"));
+            // 这一条是 G4 的主闸："新增一行成就而不动 Java 就永远判未达成"必须在写入时被点名，
+            // 而不是等玩家投诉领不到才去读引擎源码。判据与执行都在 AchievementRule 一处。
+            String problem = AchievementRule.problem(id instanceof String s ? s : null, c);
+            if (problem != null) errs.add(problem);
+            if (c != null) {
+                if (AchievementRule.Metric.discoveredSubstance.name().equals(c.metric())
+                        && !sets.presentRefMustExist("substance", c.subject()))
+                    errs.add("达成条件的对象不是已知物质: " + c.subject());
+                if (AchievementRule.Metric.knownReaction.name().equals(c.metric())
+                        && !sets.presentRefMustExist("reaction", c.subject()))
+                    errs.add("达成条件的对象不是已知方程式: " + c.subject());
+            }
+        }
         return errs;
+    }
+
+    /**
+     * 把原始 JSON 节点里的 cond 读成 {@link Content.AchCond}：这里不走 Jackson 反序列化，
+     * 因为校验器拿到的本来就是 Map，而"字段类型不对"上面的 obj 规则已经报过了——
+     * 这一步只关心"能不能念出来"，念不出来的字段按缺失处理，交给 {@code AchievementRule.problem} 定性。
+     */
+    static Content.AchCond condOf(Object raw) {
+        if (!(raw instanceof Map<?, ?> m)) return null;
+        String metric = m.get("metric") instanceof String s ? s : null;
+        String subject = m.get("subject") instanceof String s ? s : null;
+        String op = m.get("op") instanceof String s ? s : null;
+        Double value = m.get("value") instanceof Number n ? n.doubleValue() : null;
+        if (metric == null && subject == null && op == null && value == null) return null;   // 空对象＝没写
+        return new Content.AchCond(metric, subject, op, value);
     }
 
     private static void check(Field f, Map<?, ?> map, String path, List<String> errs, Sets sets) {

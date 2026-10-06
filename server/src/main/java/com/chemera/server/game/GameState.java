@@ -15,10 +15,28 @@ import java.util.Map;
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class GameState {
+public class GameState implements com.chemera.server.service.SaveService.Invariants {
 
     /** 存档结构版本，恒为 2。 */
     public int v = 2;
+
+    /**
+     * 服务端落库的结构版本位（A4）。别和上面的 {@code v} 混为一谈：
+     * {@code v} 是客户端存档形状的历史标记（js/state.js 一直带着，改了会牵连旧端），
+     * {@code sv} 只服务一件事——"这份 payload 是哪一版服务端写出来的"。
+     *
+     * <p>为什么必须有它：{@code @JsonIgnoreProperties(ignoreUnknown=true)} 让多余字段安全落地，
+     * 反过来的缺字段却毫无声音——字段改个名，旧存档读进来就是默认值，玩家金币丢了也不报错。
+     * 有了版本位，载入时会明确知道"该跑哪几条迁移"，而比本机新的存档会被直接拒绝载入
+     * （宁可让运维看到一行原因，也不要静默发一份空档覆盖掉玩家的进度）。
+     *
+     * <p>{@code Integer} 而不是 {@code int}：{@code null} 表示"这份存档早于版本位"，
+     * 与"版本 0"是两回事，迁移分支要靠它来决定是否补历史缺项。
+     */
+    public Integer sv;
+
+    /** 当前服务端写盘用的结构版本。改名/搬字段时 +1，并在 {@link SaveMigrations} 里补一条迁移。 */
+    public static final int SCHEMA_VERSION = 3;
 
     public long coins = 5000;      // CHEM.START_COINS
     public long diamonds = 0;
@@ -66,6 +84,9 @@ public class GameState {
     public int hints = 0;
     public boolean insured = false;
 
+    /** 激励视频经济：观看积分、当日各广告位次数、上次完成时刻、复活次数、已兑换项。 */
+    public Ad ad = new Ad();
+
     public Map<String, Friend> friends = new LinkedHashMap<>();
     public Chal chal = null;
 
@@ -98,6 +119,27 @@ public class GameState {
     public static String dayKey(long now) {
         return java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString();
     }
+
+    /**
+     * 落库前的结构自检（G8）：与 {@code SaveService.validate(JsonNode)} 同几条不变量、同一套文案，
+     * 区别是这里读的是已经在手里的字段，而不是为此先建一棵 JSON 树再摸一遍。
+     *
+     * <p>它挡的是"服务端自己算坏了"：金币被扣成负数、等级掉到 0、背包引用被谁悄悄置空——
+     * 这三种只要落到库里，下次载入就会以坏档形态继续滚，比当场拒绝写回难查得多。
+     * 客户端传上来的存档不走这条路（那边确实是外部输入，仍按 JsonNode 逐字段判）。
+     */
+    @Override
+    public String defect() {
+        if (v != 1 && v != 2) return "存档版本字段非法";
+        if (coins < 0) return "coins 非法";
+        if (level < 1) return "level 非法";
+        if (bag == null || discovered == null) return "bag/discovered 结构非法";
+        return null;
+    }
+
+    /** 写盘时由 {@code SaveService} 调用：版本位归写路径盖，不再靠调用方各自记得（A4／G8）。 */
+    @Override
+    public void stampSchemaVersion() { this.sv = SCHEMA_VERSION; }
 
     /* ---------- 嵌套结构 ---------- */
     @Data @JsonIgnoreProperties(ignoreUnknown = true)
@@ -172,6 +214,38 @@ public class GameState {
 
     @Data @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Sign { public String last = ""; public int streak = 0; }
+
+    /**
+     * 激励视频台账。日期键与 {@link Daily} 各自独立滚动：广告次数按玩家"完成回调"计，
+     * 而 daily 是任务计数器，两者混在一个结构里会让运营调任务时误伤广告闸门。
+     */
+    @Data @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Ad {
+        /** perDay 归属的日期键（UTC ISO），跨天清零。 */
+        public String day = "";
+        /** 累计可用的观看积分（兑换时扣）。 */
+        public int points;
+        /** 历史累计完成的广告次数，只用于展示与兑换留痕。 */
+        public int total;
+        /** 广告换来的复活次数，challenge.revive 消耗；没次数就不能白复活。 */
+        public int revive;
+        /** kind -> 当日已完成次数。 */
+        public Map<String, Integer> perDay = new LinkedHashMap<>();
+        /** kind -> 上次完成时刻（毫秒），算冷却。 */
+        public Map<String, Long> lastAt = new LinkedHashMap<>();
+        /** 兑换项 id -> 已兑次数（once 项据此拒绝二兑）。 */
+        public Map<String, Integer> redeemed = new LinkedHashMap<>();
+
+        public int dayCount(String kind) { return perDay.getOrDefault(kind, 0); }
+
+        public void addCount(String kind, int n) { perDay.put(kind, dayCount(kind) + n); }
+
+        public int todayTotal() {
+            int n = 0;
+            for (Integer v : perDay.values()) n += v == null ? 0 : v;
+            return n;
+        }
+    }
 
     @Data @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Chal {

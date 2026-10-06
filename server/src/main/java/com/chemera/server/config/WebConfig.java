@@ -23,12 +23,16 @@ public class WebConfig implements WebMvcConfigurer {
     private final AuthInterceptor authInterceptor;
     private final AdminInterceptor adminInterceptor;
     private final RequestTraceInterceptor traceInterceptor;
+    /** 意图耗时与 SQL 条数的记账拦截器（G8），只挂在 {@code /api/game/**} 上。 */
+    private final com.chemera.server.stats.IntentTraceInterceptor intentTrace;
     /** 空列表=不下发任何跨域许可（生产默认）；开发期热调前端时再列来源。 */
     private final List<String> corsOrigins;
 
     public WebConfig(AuthInterceptor a, AdminInterceptor b, RequestTraceInterceptor t,
+                     com.chemera.server.stats.IntentTraceInterceptor intentTrace,
                      @Value("${chemera.cors.allowed-origins:}") List<String> corsOrigins) {
         this.authInterceptor = a; this.adminInterceptor = b; this.traceInterceptor = t;
+        this.intentTrace = intentTrace;
         this.corsOrigins = corsOrigins;
     }
 
@@ -50,9 +54,11 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry reg) {
         // 追踪拦截器最先注册：后续鉴权抛异常时它的 afterCompletion 仍会跑，401/429 也留得下日志
         reg.addInterceptor(traceInterceptor).addPathPatterns("/**");
+        // 意图统计紧跟其后：它要在鉴权之前 begin、在响应之后 end，才知道"这一句意图花了几天 SQL"
+        reg.addInterceptor(intentTrace).addPathPatterns("/api/game/**");
         reg.addInterceptor(authInterceptor)
-                .addPathPatterns("/api/me", "/api/analytics/event",
-                        "/api/game/**",
+                .addPathPatterns("/api/me", "/api/me/minor", "/api/curfew/status", "/api/analytics/event",
+                        "/api/game/**", "/api/report",
                         "/api/auth/pass", "/api/auth/delete", "/api/auth/upgrade");
         reg.addInterceptor(adminInterceptor)
                 .addPathPatterns("/admin/api/**")

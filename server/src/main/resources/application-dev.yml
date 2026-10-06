@@ -1,0 +1,20 @@
+# 本机开发/回归专用的 profile：SPRING_PROFILES_ACTIVE=mysql,dev
+#
+# 它只做一件事——打开两条"自证通道"，它们在没有真实广告 SDK / 真实 TapTap 密钥时是唯一能让
+# 回归跑通的办法：
+#   • chemera.ad.dev-mode     ：客户端凭工单自证发放（浏览器演示播放器 + e2e 的广告链路都走它）
+#   • chemera.taptap.dev-mode ：dev:<openId> 票据可以直接换账号（没有 client_id 时登录面也能测）
+#
+# 为什么把默认值改成"关"再单独开一个 profile：这两个开关一旦带着上线，
+# 前者等于无限提款机，后者等于"我是谁"由客户端说了算（任何人都能登进别人的账号）。
+# 以前 application.yml 里默认 true，也就是"照抄仓库配置启动的实例"天然是敞开的，
+# 只有记得写 prod profile 才关得掉——那是把发钱总闸交给运维的手滑。
+# 现在裸启动（默认 mysql）两条都是关的；要测就显式带 dev。
+#
+# 顺序也有意义：prod 场景写 SPRING_PROFILES_ACTIVE=mysql,prod，这份文件根本不参与；
+# 万一有人写成 mysql,dev,prod，application-prod.yml 在后，dev-mode 仍被钉成 false。
+chemera:
+  ad:
+    dev-mode: ${CHEMERA_AD_DEV_MODE:true}
+  taptap:
+    dev-mode: ${CHEMERA_TAPTAP_DEV_MODE:true}

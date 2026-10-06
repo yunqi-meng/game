@@ -4,10 +4,10 @@ import com.chemera.server.common.BizException;
 import com.chemera.server.common.GlobalExceptionHandler;
 import com.chemera.server.controller.admin.AdminSupport;
 import com.chemera.server.controller.admin.AdminUserController;
+import com.chemera.server.game.CurfewGuard;
 import com.chemera.server.entity.AdminUser;
 import com.chemera.server.mapper.AdminMapper;
 import com.chemera.server.mapper.ContentMapper;
-import com.chemera.server.mapper.SaveMapper;
 import com.chemera.server.mapper.SessionMapper;
 import com.chemera.server.mapper.UserMapper;
 import com.chemera.server.security.AdminInterceptor;
@@ -45,16 +45,16 @@ class AdminUserResetPasswordHttpTest {
     @BeforeEach
     void setUp() {
         UserMapper users = mock(UserMapper.class);
-        SaveMapper saves = mock(SaveMapper.class);
         SessionMapper sessions = mock(SessionMapper.class);
         admins = mock(AdminMapper.class);
         auth = mock(AuthService.class);
         audit = mock(AuditService.class);
         jwt = new JwtService("reset-password-layer-secret-32-bytes!", 60);
         AdminSupport support = new AdminSupport(mock(ContentMapper.class), mock(ContentService.class));
-        AdminUserController controller = new AdminUserController(users, saves, mock(SaveService.class),
+        AdminUserController controller = new AdminUserController(users, mock(SaveService.class),
                 mock(com.chemera.server.service.PlayerAssetService.class),
-                sessions, auth, support, audit);
+                sessions, auth, mock(com.chemera.server.service.AccountPurge.class),
+                support, audit, mock(com.chemera.server.game.CurfewGuard.class));
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .addInterceptors(new AdminInterceptor(jwt, admins))

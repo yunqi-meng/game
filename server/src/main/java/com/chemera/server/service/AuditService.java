@@ -25,6 +25,9 @@ public class AuditService {
 
     public java.util.List<Map<String, Object>> page(int size, int off) { return audit.page(size, off); }
 
+    /** 审计总行数（H6-3）：分页组件的页数由它算，不由本页长度算。 */
+    public long count() { return audit.count(); }
+
     private static String clientIp(HttpServletRequest r) {
         String x = r.getHeader("X-Forwarded-For");
         return x != null && !x.isBlank() ? x.split(",")[0].trim() : r.getRemoteAddr();

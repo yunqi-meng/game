@@ -33,8 +33,19 @@ chemera:
     refresh-ttl-days: ${CHEMERA_REFRESH_TTL:30}
   session:
     revoked-retention-days: 7
+  intent:
+    # 意图幂等窗口（F2）：同一登录会话里最近多少条"写意图"的回执留在内存，重复交付直接退回原来那一帧。
+    # 弱网重发只会紧挨着原请求，8 条远够；调大只是多占内存，不会更"安全"。
+    dedupe-seqs: ${CHEMERA_INTENT_DEDUPE_SEQS:8}
+    # 同时留多少个玩家（进程内 LRU，重启清零）。上限是为了"这一层绝不把自己撑爆"：
+    # 挤出去的人只是失去幂等保护、退回 F2 之前的行为，不是丢数据。
+    dedupe-sessions: ${CHEMERA_INTENT_DEDUPE_SESSIONS:400}
   save:
     max-bytes: 2097152
+    # 存档历史抽样：每多少个 revision 往 user_save_revision 记一条全量快照（0/负数按 1 处理＝每条都记）。
+    # 只作用于"玩家意图"这一类写入；后台改档／重置／回滚／客户端上传一律整条记，见 SaveService#historyWorth。
+    # 调大省库（以前每条意图都存一份全量 payload，热玩家一天灌几千行而没人翻），调小历史更细，没有别的副作用。
+    history-every: ${CHEMERA_SAVE_HISTORY_EVERY:25}
   seed-admin:
     username: ${CHEMERA_SEED_ADMIN_USER:admin}
     # 留空则不重置已存在管理员密码；首次启动用它创建默认管理员
@@ -57,10 +68,44 @@ chemera:
     register-window-minutes: 60
     guest-max: 40                       # 游客档每次落一行 app_user
     guest-window-minutes: 60
+    taptap-max: 30                      # TapTap 首次登录同样建号，且每次验签都是一次出网调用
+    taptap-window-minutes: 60
+    # 广告网络的 SSV 回调：不带 JWT、每来一次都要算哈希查工单，按来源 IP 防洪（不是防爆破）。
+    # 本机回归的多次回调都出自 127.0.0.1，所以这一档给得比线上网段宽松；超了回 429，平台会重试，工单仍是 issued，奖励不会吞。
+    ad-callback-max: 600
+    ad-callback-window-minutes: 1
     admin-max: 20
     admin-window-minutes: 30
     admin-fail-max: 5
     admin-lock-minutes: 30
+    # 举报：按出口 IP 防洪（G2）。这台机器上的回归一小时内会连跑几轮，每轮十来条，
+    # 而且闸门在校验之前——被服务端拒掉的那几次（重复举报、非法 kind、超长理由）同样占格，
+    # 所以开发档给到 200；线上由 application-prod.yml 收紧回 20。
+    report-max: 200
+    report-window-minutes: 60
+  ad:
+    # 激励视频（TapADN / Dirichlet SSP）服务器侧回调验签。口令只走环境变量，绝不写进仓库。
+    security-key: ${CHEMERA_AD_SECURITY_KEY:}
+    # 文档只写了"trans_id 结合安全密钥做 SHA256"，没写死拼接顺序；对接时按平台实际改这里，占位符见 AdService.verifySign
+    sign-template: ${CHEMERA_AD_SIGN_TEMPLATE:{transId}{key}}
+    sign-hex: ${CHEMERA_AD_SIGN_HEX:lower}          # lower / upper
+    callback-ack: ${CHEMERA_AD_CALLBACK_ACK:json}   # json: {"code":0} ；text: 纯文本 success（平台要求哪种看回执约定）
+    # 回调来源白名单，逗号分隔；条目以 . 或 * 结尾按前缀匹配。留空=不限制（只靠配额 + 验签）：
+    # 平台没公布固定网段时，配错这一条会把线上奖励全挡死，所以默认不开。
+    callback-allow-ips: ${CHEMERA_AD_CALLBACK_IPS:}
+    # 本机演示/回归用的自证通道。**默认关闭**：开着它任何客户端都能凭工单白拿奖励，
+    # 所以"照抄仓库配置启动"必须是关的，要测就显式带 dev profile（见 application-dev.yml）。
+    dev-mode: ${CHEMERA_AD_DEV_MODE:false}
+    # TapADN 推广位 ID（激励视频）：留空时客户端用演示位，正式接入由后台/环境变量下发
+    space-id: ${CHEMERA_AD_SPACE_ID:}
+  taptap:
+    # TapTap 登录票据的服务端验签（/api/auth/taptap）。client_id 走环境变量，绝不写进仓库。
+    client-id: ${CHEMERA_TAPTAP_CLIENT_ID:}
+    # 本机演示/回归用的自证通道：**默认关闭**，理由与广告那条相同（自证票据等于身份由客户端说了算）。
+    # 要测登录面就显式带 dev profile（见 application-dev.yml）。
+    dev-mode: ${CHEMERA_TAPTAP_DEV_MODE:false}
+    # 国内节点 open.tapapis.cn；海外部署可切 api.tapapis.io
+    host: ${CHEMERA_TAPTAP_HOST:open.tapapis.cn}
 
 logging:
   level:
