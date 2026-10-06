@@ -35,10 +35,24 @@ http.interceptors.response.use(
       });
     } else {
       const msg = err.response && err.response.data && err.response.data.msg;
-      ElMessage.error(msg || "网络错误");
+      // 409 是乐观锁冲突（H6-2）：要给的是一条出路（载入最新那一版再改），不是一行飘过去就消失的红字。
+      // 所以这里不弹，交给调用方（Content.vue / Config.vue）弹确认框；其它状态照旧。
+      if (st !== 409) ElMessage.error(msg || "网络错误");
+      else err.isConflict = true;
     }
     return Promise.reject(err);
   }
 );
 
 export default http;
+
+/** 这次失败是不是"你手上那份过期了"（H6-2）。按状态码判，不按文案匹配——文案随时会改字。 */
+export function isConflict(e) {
+  return !!(e && (e.isConflict || (e.response && e.response.status === 409)));
+}
+
+/** 服务端那句"是谁在什么时候动了它"，冲突弹窗里直接用它。 */
+export function conflictMsg(e) {
+  return (e && e.response && e.response.data && e.response.data.msg)
+    || "这一项在你编辑期间已被他人改动，本次写入已取消。";
+}

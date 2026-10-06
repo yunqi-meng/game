@@ -9,8 +9,25 @@
       <el-table-column label="状态" width="90">
         <template #default="s"><el-tag :type="s.row.status ? 'danger' : 'success'">{{ s.row.status ? '封禁' : '正常' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="类型" width="80">
-        <template #default="s"><el-tag v-if="s.row.is_guest" type="info" effect="plain">游客</el-tag><span v-else>正式</span></template>
+      <el-table-column label="类型" width="90">
+        <template #default="s"><el-tag v-if="s.row.is_guest" type="info" effect="plain">游客</el-tag>
+          <el-tag v-else-if="s.row.taptap_open_id" type="success" effect="plain">TapTap</el-tag>
+          <span v-else>正式</span></template>
+      </el-table-column>
+      <el-table-column label="青少年" width="150">
+        <template #default="s">
+          <el-tooltip placement="top" effect="dark" :show-after="120">
+            <template #content>
+              <div style="max-width:320px;line-height:1.7">
+                <div>打上这个标记后，该账号只在【运营配置 · 防沉迷时段】放行的日子与窗口内能进游戏；服务端在每次玩法结算前拦，前端绕不过去。</div>
+                <div style="color:#fbbf24;margin-top:4px">关掉总开关则对所有账号放行——那是合规开关，不是给单个玩家开的口子。</div>
+                <div style="color:#94a3b8;margin-top:4px">改动写审计日志（user.minor）</div>
+              </div>
+            </template>
+            <el-switch :model-value="!!s.row.minor" :disabled="!auth.canWrite" @change="setMinor(s.row, $event)" />
+          </el-tooltip>
+          <span class="tip">{{ s.row.minor ? '限时段' : '不限' }}</span>
+        </template>
       </el-table-column>
       <el-table-column label="🪙 金币" width="110" align="right">
         <template #default="s"><span class="num">{{ n(s.row.coins) }}</span></template>
@@ -132,6 +149,29 @@ async function saveAssets() {
   assetDlg.value = false; reload();
 }
 function signed(v) { return (v > 0 ? "+" : "") + n(v); }
+
+/**
+ * 青少年模式标记（防沉迷闸门的唯一运营入口）。
+ *
+ * <p>这里不自己判断"现在能不能玩"：接口返回的就是服务端闸门给出的权威状态视图，
+ * 窗口、放行日、下次可玩时刻都以它为准，运营点完当场能看到生效没有。
+ */
+async function setMinor(row, on) {
+  if (on) {
+    await ElMessageBox.confirm(
+      `将 ${row.username} 标记为青少年账号：此后只在【运营配置 · 防沉迷时段】放行的日子与窗口内能进游戏，其余时间每一次操作都会被服务端挡下（游戏内会显示下次可玩时刻，不是白屏）。`,
+      "确认开启青少年模式", { type: "warning", confirmButtonText: "标记" });
+  }
+  const v = await http.post("/users/minor", null, { params: { id: row.id, on: !!on } });
+  row.minor = on ? 1 : 0;   // 用返回视图回写行状态，失败时开关保持原样
+  ElMessage.success(minorSummary(v));
+}
+function minorSummary(v) {
+  if (!v) return "已更新";
+  if (!v.enforced) return "已更新：防沉迷总开关当前是关的，这个标记此刻不影响游玩";
+  if (v.allowed) return "已更新：该账号当前时段可以游玩";
+  return "已更新：下次可玩 " + fmt(v.nextOpenAt);
+}
 
 async function ban(row) {
   const { value } = await ElMessageBox.prompt("封禁天数", "封禁用户", { inputValue: "7", inputPattern: /^\d+$/, inputErrorMessage: "请输入数字" });

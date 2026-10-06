@@ -8,7 +8,12 @@
         <el-menu-item index="/health">🩺 内容体检</el-menu-item>
         <el-menu-item index="/config">⚙️ 运营配置</el-menu-item>
         <el-menu-item index="/users">👤 用户与存档</el-menu-item>
-        <el-menu-item index="/moderation">🛡️ 审核与审计</el-menu-item>
+        <el-menu-item index="/moderation">
+          <span>🛡️ 审核与审计</span>
+          <!-- 真数：/admin/api/moderation/pending 读 status='open' 的计数。
+               这个数字曾经在前端写死成 0，而"停在 0"比不显示更糟——它会让人以为确实没人举报。 -->
+          <span v-if="pending > 0" class="pend">待处理 {{ pending > 99 ? "99+" : pending }}</span>
+        </el-menu-item>
         <el-menu-item v-if="auth.isSuper" index="/admins">🔑 管理员账号</el-menu-item>
       </el-menu>
     </el-aside>
@@ -45,9 +50,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
+import http from "../api";
 import { useAuth } from "../store";
 
 const route = useRoute();
@@ -57,6 +63,26 @@ const roleLabel = computed(() => ({ super: "超级管理员", editor: "编辑", 
 const passBox = ref(false);
 const busy = ref(false);
 const pf = reactive({ old: "", new: "", repeat: "" });
+
+/* 待处理举报角标。轮询而不是事件：处理一条是在 Moderation.vue 里发生的，
+   跨组件通知为一个角标不值当引入一层总线；60 秒的延迟也不会漏掉任何一条工单——它只是别停在上一轮。 */
+const pending = ref(0);
+let pendTimer = 0;
+let pendQuiet = false;   // 后台轮询失败就停手：这条不是运营点的按钮，失败却每 60 秒弹一条红字，等于用噪声代替信息
+async function reloadPending() {
+  if (pendQuiet || auth.mustChange) return;   // 强制改密期间服务端只放行改密端点，问也是 403
+  try {
+    const d = await http.get("/moderation/pending");
+    pending.value = Number(d && d.open) || 0;
+  } catch (e) {
+    pendQuiet = true;
+    clearInterval(pendTimer);
+  }
+}
+watch(() => route.path, () => { pendQuiet = false; reloadPending(); });
+onMounted(() => { reloadPending(); pendTimer = setInterval(reloadPending, 60000); });
+// 定时器必须跟着组件销毁一起停：退出登录后 Layout 会卸载，留下的是一个每 60 秒撞 401 的幽灵请求
+onBeforeUnmount(() => clearInterval(pendTimer));
 
 function openPass() { passBox.value = true; }
 function logout() {
@@ -89,4 +115,5 @@ onMounted(() => { if (auth.mustChange) passBox.value = true; });
 .head { display:flex; align-items:center; justify-content:space-between; background:#fff; border-bottom:1px solid #eee; }
 .who { display:flex; align-items:center; gap:8px; }
 .tip { color:#94a3b8; font-size:12px; }
+.pend { margin-left:auto; background:#dc2626; color:#fff; font-size:11px; font-weight:700; border-radius:9px; padding:1px 7px; }
 </style>

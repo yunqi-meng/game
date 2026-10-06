@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="bar">
-      <el-button :loading="loading" @click="run">重新体检</el-button>
+      <el-button :loading="loading" @click="run(true)">重新体检</el-button>
       <el-tag v-if="data" :type="data.ok ? 'success' : 'danger'" size="large">
         {{ data.ok ? '字段与引用全部通过' : (data.issueCount + ' 处问题') }}
       </el-tag>
@@ -10,6 +10,10 @@
       </el-tag>
       <el-tag v-if="data" type="info">已检查 {{ data.checked }} 行</el-tag>
       <el-tag v-if="data">内容版本 v{{ data.version }}</el-tag>
+      <!-- 这份结论是重扫的还是复用的，得说出来：不说的话，"我刚改了内容怎么还报这个问题"就只能靠猜 -->
+      <el-tag v-if="data" size="small" :type="data.fromCache ? 'info' : 'success'" effect="plain">
+        {{ provenance }}
+      </el-tag>
       <el-input v-model="q" placeholder="筛选类型/ID" style="width:200px;margin-left:auto" clearable />
     </div>
 
@@ -54,6 +58,14 @@ const loading = ref(false);
 const data = ref(null);
 const q = ref("");
 
+/** 这份结论是第几次扫描产出的、是不是复用来的（H6-3：整表扫描按 content_version 缓存了）。 */
+const provenance = computed(() => {
+  const d = data.value;
+  if (!d) return "";
+  const n = d.runId == null ? "?" : d.runId;
+  return d.fromCache ? `复用第 ${n} 次扫描的结果` : `第 ${n} 次扫描，刚重算`;
+});
+
 const filtered = computed(() => {
   const list = data.value?.issues || [];
   if (!q.value) return list;
@@ -61,10 +73,12 @@ const filtered = computed(() => {
   return list.filter(r => (r.type + ":" + r.id).toLowerCase().includes(k));
 });
 
-onMounted(run);
-async function run() {
+// 打开面板这一次允许吃缓存（没人改过内容时结论本来就不可能变），
+// 而【重新体检】必须绕过去 —— 一个只会回缓存的"重新体检"等于没有那个按钮。
+onMounted(() => run(false));
+async function run(fresh) {
   loading.value = true;
-  try { data.value = await http.get("/content/health"); }
+  try { data.value = await http.get("/content/health", { params: fresh ? { fresh: true } : {} }); }
   finally { loading.value = false; }
 }
 function fix(row) { router.push({ path: "/content", query: { type: row.type, id: row.id } }); }

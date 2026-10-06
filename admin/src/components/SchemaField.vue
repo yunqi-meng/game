@@ -16,16 +16,16 @@
     <!-- 布尔 -->
     <el-switch v-else-if="kind === 'bool'" :model-value="bool" @update:model-value="set" />
 
-    <!-- 闭集枚举：单选 -->
+    <!-- 闭集枚举：单选（标签带中文口径，取值仍是机器名，见 enumLabel） -->
     <el-select v-else-if="kind === 'enum'" :model-value="str" @update:model-value="set"
                clearable style="width:100%">
-      <el-option v-for="o in field.options" :key="o" :label="o" :value="o" />
+      <el-option v-for="o in field.options" :key="o" :label="enumLabel(o)" :value="o" />
     </el-select>
 
     <!-- 闭集枚举：多选 -->
     <el-select v-else-if="kind === 'enums'" :model-value="arr" @update:model-value="set"
                multiple clearable style="width:100%">
-      <el-option v-for="o in field.options" :key="o" :label="o" :value="o" />
+      <el-option v-for="o in field.options" :key="o" :label="enumLabel(o)" :value="o" />
     </el-select>
 
     <!-- 引用：单选 -->
@@ -102,6 +102,14 @@ const arr = computed(() => (Array.isArray(cur.value) ? cur.value : []));
 
 /* ref / refs / subMap 的候选来源：后端下发的 [{value,label}] 列表 */
 const refOptions = computed(() => props.options.refs?.[props.field.ref] || []);
+
+/* 枚举下拉的显示文案：后端 enumsZh 里带中文口径时显示「中文 · 机器名」，否则原样。
+   提交出去的永远是 field.options 里那个机器名——闭集校验和引擎读的都是它，
+   翻译只发生在这一层，所以面板好看与判定正确不会互相牺牲。 */
+function enumLabel(o) {
+  const zh = props.options.enumsZh?.[o];
+  return zh ? `${zh} · ${o}` : o;
+}
 
 /* stringList */
 function setList(i, v) { const a = [...arr.value]; a[i] = v; set(a); }
