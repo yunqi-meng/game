@@ -34,7 +34,9 @@ bash run.sh                                     # 或 Windows: run.bat；两者�
 - 想把前端放到别的静态站点：设 `window.CHEM_API_BASE="http://localhost:8080"`（跨域已在后端放开）。
 - `file://` 双击打开会被启动门拦下并提示"请先启动后端"，这是预期行为。
 
-> **改过前端 JS/CSS 必须同时顶版本号**：`frontend/index.html` 里所有 `css/` `js/` 引用共用一个 `?v=3.9`，而这些版本化资源的服务端响应头是 `max-age=31536000, immutable`——同一个 `?v=` 下重新发布，浏览器会一直吃那份一年期强缓存（这条我们踩过两次：一次是代码进了 jar 页面还在跑旧函数，一次是同轮里已经发过 `3.8` 又补了个函数进去，页面怎么刷都不见变化，只能整体顶到 `3.9`）。所以：**每次动前端就整站 +0.1**（`e2e-api.sh` 有一条断言在盯"版本号是否全站唯一"），测的时候再强刷。历史版本注册过的 Service Worker 会在下次更新检查时载入 `sw.js` 的自我注销桩，自动清掉旧的离线缓存。
+> **改过前端 JS/CSS 必须同时顶版本号**：`frontend/index.html` 里所有 `css/` `js/` 引用共用一个 `?v=3.14`（当前值），而这些版本化资源的服务端响应头是 `max-age=31536000, immutable`——同一个 `?v=` 下重新发布，浏览器会一直吃那份一年期强缓存（这条我们踩过两次：一次是代码进了 jar 页面还在跑旧函数，一次是同轮里已经发过 `3.8` 又补了个函数进去，页面怎么刷都不见变化，只能整体顶到 `3.9`；变现轮新增 `js/ads.js` 播放桥时顶到 `3.10`，安卓化与迭代 3 的启动链路改造顶到 `3.14`）。所以：**每次动前端就整站 +0.1**（`e2e-api.sh` 有一条断言在盯"版本号是否全站唯一"），测的时候再强刷。顶了版本号还必须**重出安卓包**（`cd android && npx cap sync android && ./gradlew assembleDebug`）——APK 里的 `assets/public` 是 `frontend/` 的拷贝，忘了同步就是"服务端 3.14、包里还是 3.13"，这条 `test/android-check.sh` 会红给你看（本轮真的红过一次）。历史版本注册过的 Service Worker 会在下次更新检查时载入 `sw.js` 的自我注销桩，自动清掉旧的离线缓存。
+
+> **改过前端的四步链，一步都不能省**（迭代 4 的 F6 把原来那句"三步"补全，因为后台产物这一环当时根本没人重建）：**① 顶 `?v=`**（全站共用一个值）→ **② `cd admin && npm run build`**（后台 SPA 的 dist 是要入库的，改了 `admin/src` 不重建，jar 里就是旧面板）→ **③ `cd server && mvn package`**（前端与后台产物都在 `process-resources` 阶段进 `target/classes/static`）→ **④ `cd android && npx cap sync android && ./gradlew assembleDebug`**（包里那份 `www` 是拷贝）。这条链现在由回归层替你盯着：第 ①/④ 步漏了 `android-check.sh` 比版本号会红，第 ② 步漏了 `test/admin-dist-check.sh`（`ci.sh` 第 2 层）会红，第 ③ 步的产物与源码不一致 CI 里 `git diff --cached --quiet` 那一步会红。
 
 ### 4. 管理后台 SPA（开发模式）
 ```bash
@@ -55,7 +57,7 @@ npm run build   # 产物输出到 server/src/main/resources/static/admin，随�
 - 危险混放（5 组）触发安全教育弹窗，可购买实验保险/防护罩减损
 - 🎯 合成挑战（限定步数 + 干扰物质，可看广告复活 +2 步）、🌌 创意沙盒（全物质无限、零惩罚、不计收益）
 - 社交：NPC 好友互访回礼、送礼涨声望、收集排行榜（服务器计算）、战绩分享
-- 商业化（模拟）：🪙金币 + 💎钻石双货币、月卡特权、皮肤、提示道具、激励视频双倍、模拟充值
+- 变现（无内购）：🪙金币 + 💎钻石双货币、月卡特权、皮肤、提示道具**全部改为看激励视频换积分**获取——玩家侧没有任何"花钱"入口与人民币标价（详见下面「激励视频变现」）
 - 每日任务、19 项成就、图鉴节点奖励、5 档年级答题、7 天连续签到、5 步教程、助手精灵
 - 🔊 WebAudio 合成音效 + 程序化 BGM（无音频文件），音量/开关等偏好也存服务器存档
 
@@ -66,15 +68,36 @@ npm run build   # 产物输出到 server/src/main/resources/static/admin，随�
 | 直写存档 | 面向客户端的 `PUT /api/save` 已下线（见 `legacy/removed/SaveController.java`），只有 `GameService` 能写 `user_save` |
 | 跳过条件用高温/电解 | `canTemp` / `canElectrolysis` 按已购设备裁决（灯/吹管/电解装置） |
 | 答题穷举选项 | 题目由 `quiz.pickOne` 单独取，**不下发正确答案**；`quiz.answer` 只认当前发出的那一题，答完即焚 |
-| 广告双倍重复领取 | 双倍必须由服务器签发的**当日一次性券**支付（`ad.bonus{kind:1}`） |
+| 自证"看完广告"骗奖励 | 旧意图 `ad.bonus` 已关回绝；奖励只认**广告网络服务器回调**验签通过的工单（见「激励视频变现」），且 `trans_id` 唯一 + 条件 UPDATE，重复回调只算一次 |
+| 绕过复活/双倍的费用 | `challenge.revive` 只消耗看广告换来的 `ad.revive` 次数，双倍必须由服务器签发的**当日一次性券**支付，券同样来自广告 |
 | 反应/经济随机数可预测 | 结算随机源在服务端（`DoubleSupplier`），客户端随机只影响特效 |
 
-- ☁️ 进度即时入库：每次意图调用都以 `revision` 递增写回 `user_save`，历史留在 `user_save_revision` 可回滚；`EngineCtx` 承载挑战/沙盒临时现场，服务重启后能从存档复原现场
+- ☁️ 进度即时入库：**写意图**以带号 CAS 写回 `user_save`（`UPDATE … WHERE user_id=? AND revision=?`，抢输的一方重读最新帧重放，同一账号两台设备不会互相抹掉），只读意图（`state`/`ad.status`/`leaderboard`/`quiz.pickOne`）只在真有东西要落时才写盘；历史留在 `user_save_revision` 可回滚，`intent` 来源每 25 版抽记一条、后台改档/上传/回滚/重置与初始帧必记，且修剪那句 SQL 带 `AND revision > 1`——账号过 31 版也不会把第 1 版删掉，后台【回滚到最早一版】永远有锚点；`EngineCtx` 承载挑战/沙盒临时现场，服务重启后能从存档复原现场
 - 账号：登录/注册页（三条路径：登录 / 注册 / 游客模式）+ BCrypt + JWT access/refresh 双令牌、改密（其余设备会话失效）、注销（物理清除该用户的会话/存档/历史/埋点）、退出后回到登录页
+
+## 激励视频变现（玩家侧零付费）
+
+没有版号就不能有内购计费，而激励视频不属于内购，所以原来那套"模拟充值 + 钻石档位 + 商店购买"整面下线，改为**看一段视频换一份积分、积分兑换原付费项**。奖励的唯一入口是服务端工单，客户端说的话一律不算数：
+
+```
+ad.request ──签发──▶ ad_ticket(issued) ──平台回调验签──▶ rewarded ──取帧开头 settle──▶ settled + 进存档
+   ↑                        ↑                                        ↓
+ 闸门逐条拒          extra=32位随机票据                         events:[{type:"ad",granted:[…]}]
+```
+
+- **签发**（`AdService.request`）：总开关 → 能不能真发奖 → kind 在目录内 → 该位每日次数 → 等级门槛 → 该位余量 → 全局日上限 → 冷却 → 同位仅一张在途。奖励类型·数量·积分在签发一刻**定格进工单**，运营中途改配置不影响玩家正在看的这一笔。
+- **回调**（`POST /api/ad/callback`，`AdController`）：来访的是广告网络的服务器，**不带玩家 JWT**，身份全靠 SHA-256 验签；`trans_id` 唯一 + 条件 UPDATE 让平台重试与并发只算一次，且重复回调仍回成功（回失败平台会一直重试）。query / form / JSON 体三种回传方式都合并接，`chemera.ad.callback-ack` 切回执形态。
+- **结算**（`AdService.settle`）：放在**每次意图的最前面**，所以"回调比玩家下一次请求晚到"也不会丢奖励；到账明细走整帧 `events`，客户端 `G.announce` 见 `type:"ad"` 就弹"🎁 广告奖励已到账"。
+- **配置**：`app_config` 的 `ad` 键（后台【运营配置】可编辑，`ConfigSpec` 标为服务端结算）管 `enabled / dailyTotal / minLevel / ticketTtlSec / viewPoints / slots[] / unlocks[]`；密钥与拼接口令只走环境变量 `CHEMERA_AD_*`（`security-key / sign-template / sign-hex / callback-ack / dev-mode / space-id`），仓库里不落任何值。`/api/healthz` 的 `ad:{ready,devMode}` 是拨测点。
+- **护栏**：全局每日 16 次上限 + 每位冷却，防止"肝广告"取代做实验成为主循环；`minLevel` 让新玩家先跑通核心玩法；`enabled=false` 时整页给"暂未开放"，不出现点了没下文的死按钮；奖励类型只认 `coins/diamonds/hints/coupon/revive/monthly_days/pack_el/skin` 八种，运营填错的那一位直接跳过而不是崩掉整帧。
+- **演示通道**：`chemera.ad.dev-mode=true` 时浏览器预览用一段倒计时动画代替真广告、奖励走 `ad.devGrant`；prod profile 把该值写死 false，且 `ProdHardening` 检测到 true 直接拒绝启动——自证通道等于无限提款机，不可能带上线。
+- 客户端接线：`js/ads.js` 是播放桥（原生壳 `window.ChemeraAd.showRewardVideo({spaceId, extra:ticket, …})`），`U.watchAd(kind, cb)` 是所有观看动作的唯一路径（广告中心、炸锅慰问金、挑战复活、双倍领取券），【设置·广告】整页只吃 `ad.status` 一个视图包。
+
+深一点的字段口径、上线前还要比对的两件事（真实签名拼接与回执格式）写在 `docs/android-taptap-plan.md` 第 10 章。
 
 ## 数据规模
 
-118 元素 + 96 化合物 + 143 条配平方程式（含离子/可逆/热化学与彩蛋链）+ 5 组危险混合 + 3 条实验工艺 + 27 种仪器 + 5 间实验室 + 25 道题库 + 19 成就 + 商店/任务/配置等，共 **458 条内容 + 13 项运营配置**，全部落库、可在后台在线编辑与发布。
+118 元素 + 96 化合物 + 143 条配平方程式（含离子/可逆/热化学与彩蛋链）+ 5 组危险混合 + 3 条实验工艺 + 27 种仪器 + 5 间实验室 + 25 道题库 + 19 成就 + 商店/任务/配置等，共 **458 条内容 + 14 项运营配置**，全部落库、可在后台在线编辑与发布。
 
 ## 目录结构
 
@@ -82,15 +105,16 @@ npm run build   # 产物输出到 server/src/main/resources/static/admin，随�
 
 ### 前端 `frontend/`（纯 HTML/CSS/JS，无构建，由后端静态托管）
 ```
-frontend/index.html                               入口页（#stage 同层两页 + 7 页签底部导航 + 页内分段条 #page-segs；css/js 统一带 ?v=3.9）
+frontend/index.html                               入口页（#stage 同层两页 + 7 页签底部导航 + 页内分段条 #page-segs；css/js 统一带 ?v=3.14）
 frontend/sw.js                                    已废弃的离线壳 → 自我注销桩（清缓存 + unregister）
 frontend/css/style.css                            设计变量（tokens）+ 三套皮肤 + 全部语义类样式
 frontend/images/                                  图标
 frontend/js/data/*.js                             首帧基线数据（元素/化合物/反应/仪器…），联网后被后端 bundle 覆盖
-frontend/js/content.js                            远端内容加载：拉取 bundle 覆盖全局 + 版本缓存
+frontend/js/content.js                            远端内容加载：拉取 bundle 覆盖全局 + 版本缓存（首装那一次也吃 cloud.js 的 12 秒期限，挂着不回就等于遮罩永远转圈）
 frontend/js/state.js  frontend/js/engine.js       服务器帧的只读视图 + 无状态预览（投放/反应判定不在本地算）
 frontend/js/fx.js  frontend/js/sfx.js             粒子/液面 与 WebAudio 音效
-frontend/js/cloud.js  frontend/js/game.js         账号 API 客户端 与 意图桥接（串行队列 + 整帧落地 + 启动门）
+frontend/js/cloud.js  frontend/js/game.js         账号 API 客户端 与 意图桥接（串行队列 + 整帧落地 + 启动门）；每个请求自带 `AbortController` + 12 秒期限且回调恰好一次（H2），每笔意图领一个会话内 `seq` 交服务端幂等（F2），换身份时 `epoch++` 把上一轮的迟到回包和所有定时器一起剪掉（H2）
+frontend/js/ads.js                                激励视频播放桥 `CHEM.ad`：原生壳走 `window.ChemeraAd.showRewardVideo`，浏览器预览退化成带"演示"标注的倒计时动画
 frontend/js/gate.js                               登录 / 注册页（鉴权门）：登录、注册、游客模式三条路径
 frontend/js/icons.js                              仪器线稿图标的唯一真源（27 仪器 + 兜底，图元数组而非字符串）
 frontend/js/ui.js  frontend/js/panels.js  main.js 工作台与整页导航（ui：台面/物质架/拖拽投放；panels：`P.go(tab)` 页面路由 + 六页渲染；全部只发意图）
@@ -113,7 +137,7 @@ frontend/js/ui.js  frontend/js/panels.js  main.js 工作台与整页导航（ui�
 | 🏪 市场 | 采购 / 特惠 / 黑市 / 耗材 / 出售 / 挂单 | 商会订单是**委托**不是货架 → 搬去【任务·今日】 |
 | 📋 任务 | 今日（签到 + 每日任务 + 商会订单）/ 成就 / 玩法（挑战·沙盒·答题）/ 社交 | 每日签到原埋在【设置·分享与其他】，玩家根本翻不到 → 搬来并配 7 天礼包进度点 |
 | 🏗️ 建设 | 房间 / 仪器 / 升级 | — |
-| ⚙️ 设置 | 通用 / 外观 / 账号 / 商店 / 关于 | 内购从玩法运营里独立成"商店"段；账号段集中转正·改密·退出·注销 |
+| ⚙️ 设置 | 通用 / 外观 / 账号 / 广告 / 关于 | 变现面独立成"广告"段（v3.10 由"商店"改来：钻石商店与模拟充值已整面下线，皮肤与月卡的入口改成跳这一段的 `📺 积分兑换`）；账号段集中转正·改密·退出·注销 |
 
 - **段上的数字＝现在有几件事可做**（可领的成就/待交付订单/买得起的仪器…），由 `claimCounts()` 与 `buyableCount()` 算一份，底部导航那枚 `.nav-badge` 读的是同一份函数——领完奖励红点自己掉，不存在两处数字打架。游客档没有口令，设置页给的是圆点而非数字（`-1` 约定）。
 - **记忆与滚动**：`segState[tab]` 记住每页上次停在哪一段，`P.render()` 以 `tab + ":" + seg` 为键还原 `scrollTop`，切页回来不会掉到顶部；`qFocus` 在过滤重绘后把光标送回搜索框（选区一起还原）。
@@ -153,9 +177,9 @@ src/main/java/com/chemera/server/                 controller / service / mapper 
 vite.config.js                                    base=/admin/，构建产物 outDir 直出到 server/.../static/admin
 src/                                              页面 / 组件 / 路由 / 接口封装
 ```
-内容管理与运营配置由 `ContentSchema` 的字段描述符驱动：同一份描述符既生成编辑表单，也做写入期校验与内容体检（`/content` 的类型化表单、`/config` 的按 key 编辑器、`/health` 的问题行定位）。`/config` 每项都带**作用说明书**（`server/.../game/ConfigSpec.java`，经 `/admin/api/config/spec` 下发）：中文名、生效范围（服务端结算 / 服务端+前端 / 部分生效 / 仅前端）、"改了会怎样"的风险提示、以及读它的代码出处；`ConfigSpecTest` 保证说明书与 `Content.Config` 的字段一一对应，加字段不写说明即测试失败。**特别标注**：`start_coins` 与 `tier_names` 只被前端读取，改它们不会改变服务端结算（详见下表「运营配置速查」）。`/admins` 是超管专属的后台账号页（建号/改角色/停用/删除/重置口令），初始口令未改时整个 SPA 被钉在改密弹窗上；`/users` 里给玩家重置口令走的是同一道超管闸门。**尚未后台化**的写死项与架构缺口见 `docs/content-management-followups.md`（成就判定条件、等级曲线、内容版本历史等）。
+内容管理与运营配置由 `ContentSchema` 的字段描述符驱动：同一份描述符既生成编辑表单，也做写入期校验与内容体检（`/content` 的类型化表单、`/config` 的按 key 编辑器、`/health` 的问题行定位）。`/config` 每项都带**作用说明书**（`server/.../game/ConfigSpec.java`，经 `/admin/api/config/spec` 下发）：中文名、生效范围（服务端结算 / 服务端+前端 / 部分生效 / 仅前端）、"改了会怎样"的风险提示、以及读它的代码出处；`ConfigSpecTest` 保证说明书与 `Content.Config` 的字段一一对应，加字段不写说明即测试失败。变现口径最敏感的 `ad` 键额外有一道**存前守卫**：`AdConfigValidator` 按引擎实际读取的字段与取值域校验整份目录，`/admin/api/config/ad/schema` 把合法 reward 集合、皮肤集合、字段清单与边界值下发给面板，面板据此渲染类型化编辑器（广告位/兑换项逐行编辑，不用手改 JSON），被拒时服务端那句"广告位 #2 的 reward「coin」不被引擎支持…"会逐条显示在对话框里（`AdConfigValidatorTest` 13 例钉住守卫本身，`e2e-api.sh` 对着真接口再跑一遍并列 7 种坏配置）。**特别标注**：`start_coins` 与 `tier_names` 只被前端读取，改它们不会改变服务端结算（详见下表「运营配置速查」）。`/admins` 是超管专属的后台账号页（建号/改角色/停用/删除/重置口令），初始口令未改时整个 SPA 被钉在改密弹窗上；`/users` 里给玩家重置口令走的是同一道超管闸门。**尚未后台化**的写死项与架构缺口见 `docs/content-management-followups.md`（成就判定条件、等级曲线、内容版本历史等）。
 
-### 运营配置速查（13 项）
+### 运营配置速查（14 项）
 
 | 键 | 名称 | 生效范围 | 一句话作用 |
 | --- | --- | --- | --- |
@@ -171,7 +195,8 @@ src/                                              页面 / 组件 / 路由 / 接
 | `quiz_reward` | 答题基础奖励 | 部分生效 | 实发 = quiz_reward × 年级倍率（小学/初中 1.0、高中 1.2、大学 1.5 写死） |
 | `tutorial_coins` | 新手引导完成奖励 | 服务端结算 | 走完教程第 3 步一次性发放，老玩家不会重领 |
 | `start_coins` | 新号初始金币 | **仅前端** | 服务端新建档写死 5000，改这个值不会改变玩家实际到手的金币 |
-| `recharge` | 模拟充值档位 | 服务端+前端 | c=标价（元）、d=到账钻石，按下标选档；当前不接真实支付渠道 |
+| `ad` | 激励视频广告中心 | 服务端结算 | 6 个广告位 + 4 个积分兑换项的目录，含日上限/等级门槛/工单有效期/每段积分；闸门与发奖全在 `AdService`，改这里就是改变现口径。**写入即校验**（`AdConfigValidator`）：reward 不被引擎支持、kind/id 重复、冷却与门槛越界、计数类数量填 0、skin 兑换项漏给皮肤，全部在落库前拒掉并把行号与合法集合回给面板；面板是类型化编辑器（选项来自 `/admin/api/config/ad/schema`，与引擎用的是同一份常量） |
+| `recharge` | 模拟充值档位 | **已退役（改它不生效）** | 付费面随变现改造下线，档位行仍在库里（不能改已应用的迁移），只是引擎不再读它；重新启用内购要先办版号 |
 
 
 ### 跨切面开发辅助（仓库根）
@@ -181,11 +206,14 @@ tools/backup.sh                                   整库快照（专用备份账
 tools/restore.sh                                  从快照恢复：支持 --into 别的库做恢复演练，覆写原库要二次确认
 tools/icon-preview.mjs                            把 js/icons.js 栅格化成 ASCII 人眼确认形状；有问题图形（越框/液体溢出/漏画）退出码非 0
 test/icon-geom.js                                 图标几何裁判（path 解析 + 越框/未知图元/液体溢出判定），validate.js 与上面的预览工具共用
-test/validate.js                                  数据一致性校验（读 frontend/js/data 内嵌基线 + 反应图完整性 + 仪器图标覆盖率与几何）
-test/e2e-api.sh                                   端到端回归：游客→意图闭环→防作弊闸门→鉴权令牌治理→转正并档→后台账号与口令→静态托管→内容管理
-test/ci.sh                                        一键串起上面三层回归（可挂 CI 或提交前钩子）
+test/css-guard.js                                 CSS 旧引擎兜底裁判（`color-mix()` 只能待在 @supports 块内、`--mix-*` 令牌有定义且都被用、不许裸 `inset:`、dvh/min/max 前面要有同属性旧写法），validate.js 调它，android-check.sh 拿包内那份 CSS 再判一次
+test/cloud-timeout.js                             客户端请求期限裁判（vm 载真实 cloud.js + 注入坏 fetch）：超时/迟到正文/reject 三者只有第一个把回调叫起来，且不误报成彼此；validate.js 调它
+test/validate.js                                  数据一致性校验（读 frontend/js/data 内嵌基线 + 反应图完整性 + 仪器图标覆盖率与几何 + CSS 兜底 + 请求期限）
+test/e2e-api.sh                                   端到端回归：游客→意图闭环→防作弊闸门→鉴权令牌治理→存档带号 CAS 与意图幂等→转正并档→后台账号与口令→静态托管与客户端弱网锚点→内容管理
+test/admin-dist-check.sh                          把 admin/src 重建到 admin/.dist-check，先比文件清单再逐文件比哈希（随包后台产物不许落后于源码）
+test/ci.sh                                        一键串起五层回归：数据一致性 → 后台产物同源 → 后端单测 → 端到端 API → 安卓包自检（可挂 CI 或提交前钩子）
 docs/content-management-followups.md              后台内容管理本轮边界 + 仍写死项/架构缺口清单
-docs/upgrade-plan.md                              安全/运维/性能/代码健康的升级方案与迭代进度
+docs/upgrade-plan.md                              安全/运维/性能/代码健康的升级方案与迭代进度（迭代 1~3 已完成；迭代 4 是 2026-10-06 全面复查后的提案，P0 三批 F4/F7/F5/F6 → F1/F3 → F2/H2 已落地，G/H 按第 5 节顺序在 P0 之后）
 docker-compose.yml                                可选：一键起 MySQL 9.5（宿主 3307）
 legacy/                                           旧版零依赖 server.js、PWA manifest 等历史件
 legacy/removed/                                   被在线化淘汰的代码（客户端存档直写端点、驱动本地引擎的 JS 冒烟/全量合成测试）
@@ -203,7 +231,8 @@ legacy/removed/                                   被在线化淘汰的代码（
 | `/api/healthz` | GET | 运维探活：`SELECT 1` + 内容版本 + 在线会话数，数据库不通返回 503。所有响应都带 `X-Request-Id`（traceId，进日志） |
 | `/api/auth/pass` · `/delete` | POST (Bearer) | 改密（其余会话失效）/ 注销（连带清除存档与埋点） |
 | `/api/game/state` | GET | 整帧快照：载入存档 + 每日刷新落库后返回最新 `state` |
-| `/api/game/{intent}` | POST `params` | **唯一玩法入口**，返回 `{state,revision,result,events,bench?,sandbox}`。意图涵盖 `bench.place/takeBack/clear/temp/electrolysis/vessel/switch`、`react{multiplier,insured?}`、`challenge.*`、`sandbox.*`、`market.buy/consumable/special/black/sell`、`listing.create`、`order.fulfill`、`sign`、`quiz.pickOne/answer`、`shop.buy/recharge`、`upgrade.vessel/equipment/tier/lab/room`、`refine`、`claim.ach/daily/milestone`、`hint`、`friend.visit/gift`、`leaderboard`、`ad.bonus`、`settings`、`tutorial.step`、`reset` |
+| `/api/game/{intent}` | POST `params` | **唯一玩法入口**，返回 `{state,revision,result,events,bench?,sandbox}`。意图涵盖 `bench.place/takeBack/clear/temp/electrolysis/vessel/switch`、`react{multiplier,insured?}`、`challenge.*`（含 `revive`，只消耗看广告换来的次数）、`sandbox.*`、`market.buy/consumable/special/black/sell`、`listing.create`、`order.fulfill`、`sign`、`quiz.pickOne/answer`、`upgrade.vessel/equipment/tier/lab/room`、`refine`、`claim.ach/daily/milestone`、`hint`、`friend.visit/gift`、`leaderboard`、`ad.request/status/exchange/devGrant`、`settings`、`tutorial.step`、`reset`。旧的三条付费面 `shop.buy`、`shop.recharge`、`ad.bonus` 已关回绝（回绝也带原因文案，客户端不再有任何入口） |
+| `/api/ad/callback` | POST (query/form/JSON) | **激励视频服务器回调（SSV），不带玩家 JWT**：广告网络播完后来这里，`pid/user_id/trans_id/extra/sign` 验签通过才置 `rewarded`；刻意挂在 `/api/game/**` 之外，避免被鉴权拦截器挡成 401 |
 | `/api/me` | GET (Bearer) | 当前账号与云端存档概要 |
 | `/api/content/version` · `/bundle` | GET | 内容版本号 / 全量内容 + 配置（客户端按版本缓存） |
 | `/api/analytics/event` | POST (Bearer) `{event,props}` | 埋点（白名单事件；未登录忽略） |
@@ -222,10 +251,12 @@ SPRING_PROFILES_ACTIVE=mysql,prod \
 CHEMERA_JWT_SECRET="<至少 32 字节随机串>" \
 CHEMERA_SEED_ADMIN_PASS="<首次创建超管用，之后留空不重置>" \
 CHEMERA_DB_PASSWORD="<库口令>" \
+CHEMERA_AD_SECURITY_KEY="<TapADN 后台的安全密钥；留空则广告中心不签发工单>" \
+CHEMERA_AD_SPACE_ID="<激励视频推广位 ID>" \
 CHEMERA_TRUST_XFF=true \
 java -jar target/chemera-server.jar
 ```
-`application-prod.yml` 相对开发配置的差别只有"默认值不再宽容"：跨域默认完全不下发（同域部署无需 CORS，需分离域名时用 `CHEMERA_CORS_ORIGINS` 明确列源）、限流收紧、错误页不泄栈、`forward-headers-strategy=native`。启动时 `ProdHardening` 会做自检：**prod 下若仍用仓库内置 JWT 密钥、或没给管理员口令，进程直接拒绝启动**（开发环境只打 WARN）。HTTPS 与反向代理仍需在 Nginx/Caddy 层配置，配置后把 `CHEMERA_TRUST_XFF` 打开才能让限流看到真实来源 IP。
+`application-prod.yml` 相对开发配置的差别只有"默认值不再宽容"：跨域默认完全不下发（同域部署无需 CORS，需分离域名时用 `CHEMERA_CORS_ORIGINS` 明确列源）、限流收紧、错误页不泄栈、`forward-headers-strategy=native`、`chemera.ad.dev-mode` 写死 `false`。启动时 `ProdHardening` 会做自检：**prod 下若仍用仓库内置 JWT 密钥、没给管理员口令、或把广告自证通道 `dev-mode` 开着，进程直接拒绝启动**（开发环境只打 WARN）；没配广告密钥不拦启动，只 WARN 并把 `/api/healthz` 的 `ad.ready` 报成 false。HTTPS 与反向代理仍需在 Nginx/Caddy 层配置，配置后把 `CHEMERA_TRUST_XFF` 打开才能让限流看到真实来源 IP。
 
 日志落在 `logs/chemera.log`（按天 + 20MB 滚动，保留 30 天 / 500MB 上限），每行带 `[traceId]`，与响应头 `X-Request-Id` 一一对应；`GET /api/healthz` 可直接给容器编排或 Uptime 探测用。数据快照见上文「管理员账号、玩家口令与备份」。
 
@@ -241,7 +272,7 @@ java -jar target/chemera-server.jar
 
 **玩家忘记密码**：本作没有邮件服务可自助验证身份，所以找回路径是人工的——登录页【忘记密码？】会说明怎么找管理员，管理员在【用户管理】按用户名定位后点【重置口令】给一个临时口令。重置会作废该玩家**全部刷新令牌**（旧口令立即失效），已打开的页面最长还能用到访问令牌自然过期（≤2 小时）。游客档没有口令，接口直接拒绝重置，避免凭空造出一个可登录的正式账号；列表里的「类型」列可区分游客档。
 
-**调整玩家资产（`POST /admin/api/users/assets`，仅 `super`）**：金币和钻石不是 `app_user` 的列，而是 `user_save.payload` 这块 JSON 里的字段，所以【用户管理】列表用 `JSON_EXTRACT` 把余额直接带出来（没有存档的游客显示 `-`），【调整资产】弹窗改的也是这块 JSON。`PlayerAssetService` 有三道闸门：填的是**增减量**而非目标值（避免运营在两个界面来回抄数字时把玩家余额覆盖成别人的）、单次不超过 1000 万且结果不得为负或越过余额上限（金币 10 亿 / 钻石 100 万，对齐最高充值档）、没有云端存档的玩家直接拒绝而不是凭空建一档。它只改 payload 里点名的字段（用 `JsonNode` 原地改，不走 `GameState` 反序列化，否则 `ignoreUnknown` 会静默丢掉客户端遗留字段），并且**每个请求都回库读档**的玩家侧会立刻看到新余额——`PUT /api/save` 早已 404，客户端无从把自己的旧数字盖回来。
+**调整玩家资产（`POST /admin/api/users/assets`，仅 `super`）**：金币和钻石不是 `app_user` 的列，而是 `user_save.payload` 这块 JSON 里的字段，所以【用户管理】列表用 `JSON_EXTRACT` 把余额直接带出来（没有存档的游客显示 `-`），【调整资产】弹窗改的也是这块 JSON。`PlayerAssetService` 有三道闸门：填的是**增减量**而非目标值（避免运营在两个界面来回抄数字时把玩家余额覆盖成别人的）、单次不超过 1000 万且结果不得为负或越过余额上限（金币 10 亿 / 钻石 100 万，量级沿用原最高充值档）、没有云端存档的玩家直接拒绝而不是凭空建一档。它只改 payload 里点名的字段（用 `JsonNode` 原地改，不走 `GameState` 反序列化，否则 `ignoreUnknown` 会静默丢掉客户端遗留字段），并且**每个请求都回库读档**的玩家侧会立刻看到新余额——`PUT /api/save` 早已 404，客户端无从把自己的旧数字盖回来。
 每次成功调整写两道留痕：存档历史的 `source='admin'`（与 `upload`/`rollback` 区分，玩家侧【历史】也看得到），以及 `audit_log` 的 `user.assets` 记录，明细带 `coinsBefore/coinsAfter/diamondsBefore/diamondsAfter/revision`——【审核与审计 → 操作日志】的「明细」列直接把这段前后值显示出来。权限与重置口令同档（`requireSuper`）：这一口能凭空造钱，编辑角色不该有路径；角色仍以库为准，所以把超管降为编辑后他手里的旧令牌立即调不动它。
 
 **备份与恢复**：玩家进度只存在于 `user_save` + `user_save_revision`，这是全项目唯一的丢失面。
@@ -258,23 +289,44 @@ bash tools/restore.sh backups/chemera-xxx.sql.gz                              # 
 ## 构建与测试
 
 ```bash
-cd server && mvn clean package        # 133 个 JUnit：领域模型/内容注册表/引擎/经济/意图层/内容校验/配置说明书/全量合成/令牌轮换/限流/上线自检/后台账号 CRUD/玩家资产调整 + HTTP 层鉴权
+cd server && mvn clean package        # 314 个 JUnit：领域模型/内容注册表/引擎/经济/意图层/内容校验/配置说明书/广告目录写入守卫/全量合成/令牌轮换/限流/上线自检/后台账号 CRUD/玩家资产调整/激励视频工单/防沉迷时段/合规目录/TapTap 票据验签/会话活体检查/存档迁移与版本位/存档带号 CAS 与并发意图/广告奖励随作废帧退回/历史抽样与修剪锚点/**意图幂等窗口（同 `(uid,sid,seq)` 只结算一次且逐字相同 / stale 与只读不进窗口 / 换 sid 可复用同号 / 配额淘汰不吞请求）**/内容分片报告 + HTTP 层鉴权与状态码
 cd server && mvn spring-boot:run      # 或 java -jar target/chemera-server.jar
 
-bash test/ci.sh                       # 一键全量回归：数据一致性 → 后端单测 → 端到端 API（后端没起就跳过第三层）
-node test/validate.js                 # 前端内嵌数据一致性（118 元素 / 143 反应 / 引用完整性）
+bash test/ci.sh                       # 一键全量回归五层：前端数据一致性 → 后台随包产物与源码同源 → 后端单测 → 端到端 API（后端没起就跳过）→ APK 自检（本机产出过包才跑）
+bash test/android-check.sh android/app/build/outputs/apk/debug/app-debug.apk   # 单独验一个包
+node test/validate.js                 # 前端静态裁判：内嵌数据一致性（118 元素 / 143 反应 / 引用完整性）+ 图标几何 + CSS 旧引擎兜底 + 请求期限回调
 bash test/e2e-api.sh                  # 端到端回归（需后端已启动）
 ```
 
+**安卓壳**（Capacitor 8，工程在 `android/`，`webDir` 直指 `frontend/`——零构建，所以"打包"就是把目录拷进 `assets/public`）：
+
+```bash
+cd android && npx cap sync android       # 改了前端必须重跑这句，否则包里是旧 JS
+./gradlew assembleDebug                  # debug 包；release 用 keystore/ 那份，口令走环境变量
+bash test/android-check.sh android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+- **`./gradlew` 要 JDK 21+，别把 `JAVA_HOME` 指到 17**：`capacitor-android` 模块按 release 21 编译，指 17 会在 `:capacitor-android:compileDebugJavaWithJavac` 挂在一句"无效的目标发行版：21"上（Windows 控制台还会把它显示成乱码）。后端自身仍是 Java 17 目标，两边不是一回事。
+- 版本号同源是这里最容易漏的一环：`/js/*` 走强缓存一年，APK 里的 `www` 又是仓库的拷贝，所以 `android-check.sh` 专门比"壳内 `?v=` == 仓库 `?v=`"，`test/ci.sh` 第 5 层会因此红。
+
+**CI**：`.github/workflows/ci.yml` 在 Linux runner 上起 MySQL 8，口令每次作业现生成并 `::add-mask::`（仓库里不落任何字面量，也不建 `server/.env`），建库走仓库里那份 `server/db/bootstrap.sql`（与本地同一条初始化路径），Flyway 播种后跑 `bash test/ci.sh`。`ci.sh` 默认 `mvn -o`（本机 .m2 已满，省几分钟），CI 传 `MVN_FLAGS=` 走在线解析。放 Linux 不是偏好问题：Windows 控制台会把 curl 参数里的中文按 GBK 送出去，同一份 e2e 会假红。`ci.sh` 开了 `pipefail`——每层都是 `cmd | grep | tail`，不开的话退出码是 `tail` 的，mvn 编译失败也照样打"全部通过"。
+
+迭代 4 给这条流水线补了三件事，每件都对应一次真实事故：**① `mvn package` 前先 `working-directory: admin` 跑 `npm ci && npm run build`，再拿 `git add -A -- <随包目录>` + `git diff --cached --quiet` 断"随包后台产物已入库"**——本项目定的是"后台产物入库、jar 直出"，可 CI 从来不重建它，于是干净检出的 jar 里【运营配置】是防沉迷之前的老表单，而本地那几条读工作区文件的断言永远绿。**② 后端起在 `SPRING_PROFILES_ACTIVE=mysql,dev`**：广告与 TapTap 的自证通道 `dev-mode` 默认已经翻成 `false`，只有 `dev` profile 打得开（见「上线自检」一节），漏掉 profile 的实例就是公网提款机。**③ 第 4 层不再 `| tail -8`**：e2e 全文落到 `server/logs/e2e-latest.log`，终端把每一行 `✗` 原样打出来。这条改动的直接价值是下一轮那个 MySQL 死锁能当场定位，而不是重跑碰运气。本地跑不了后台构建时可以 `ADMIN_CHECK=skip bash test/ci.sh` 跳第 2 层（其余四层照跑）。
+
 - `FullSynthesisTest` 逐条驱动 Java 引擎，证明 143 条反应与 3 条工艺都能按其声明条件正常合成 —— 取代了原先驱动本地 JS 引擎的 `test/smoke.js` 与 `test/full-synthesis.js`（两者已移入 `legacy/removed/`）。
-- `e2e-api.sh` 额外校验：无 token 取帧 401、未知意图被拒、温度/电解设备闸门、答题防透题与一次一题、广告券一次一用、偏好持久化、游客转正并档、`PUT /api/save` 已 404、首页静态托管与离线壳清理、登录门（`js/gate.js` 随包发布 + 首页含 `#gate-root` 与忘记密码指引 + `game.js` 未登录先过门）、注册可省昵称与弱密码被拒、**令牌轮换（用一张废一张 / 宽限期内并发刷新可用 / 退出后硬撤销绝不补发 / 陌生令牌 401）**、**鉴权防爆破（连续失败转 429、锁定按账号隔离、游客档配额内可建）**、**缓存与运维面（版本化脚本 immutable、入口文档 no-cache、`X-Request-Id`、`/api/healthz` 报库连通）**；管理侧另有一组（schema 覆盖 13 类、options 候选、内容体检 0 问题覆盖 458 行、`strict` 非法写入被拒且不留脏行、`strict=false` 后门可写）、**后台账号 CRUD（建号响应不含哈希、弱口令被拒、首登 mustChange、锁定期内只放行自助改密、viewer 管不了账号、停用后旧令牌立刻失效、最后一个在岗超管动不了、测完自动清理）**、**玩家口令重置（按用户名定位、旧刷新令牌整户作废、旧口令立即 401、游客档拒绝重置）**、**运营配置说明书（`/admin/api/config/spec` 覆盖 13 个键、每条带中文名/作用/风险/出处/生效范围、`sell_rate` 标服务端结算而 `start_coins` 老实标仅前端、库里的键必须全部收进说明书、自定义键确认不在说明书里）**、**玩家资产调整（列表带出 payload 里的余额、加金币后玩家下一次取帧即生效、只调一项不清零另一项、存档历史标为 `admin`、审计明细带前后值、扣穿/超单次上限/零增减/非整数各被拒、玩家令牌与无令牌 401）**。当前 PASS=147 / FAIL=0，可连续多轮执行（限流段、建号段、资产段与临时配置键都不污染后续运行）。编辑/只读角色拿超管令牌调资产被拒这类**角色以库为准**的分支由 `AdminUserAssetsHttpTest` 在 HTTP 层钉住，e2e 只跑真实存在的超管与玩家两种令牌。另有一组**客户端页面结构**断言守着整页化改造：首页不再有 `#sheet`、`#stage`/`#page-body` 就位、底部导航 7 个 `data-tab`（含 `bench` 本身是一页）、实验台自带 `#quick-shelf`、`style.css` 里 `#sheet` 清零且改由 `.page.on` 驱动、`panels.js` 是 `P.go(tab)` 而非 `openTab`、回实验台会 `CHEM.fx.resize`、`ui.js` 有 `renderQuickShelf` 与 `pointercancel`/`isDragging` 守卫，以及全站 `?v=` 唯一。另有一组**容器图标**断言守着 emoji 错配不再回归：`js/icons.js` 随包发布且 `<script>` 排在 `ui.js` 之前、首页有 `#vessel-icon` 且 `#vessel-emoji`/`#liquid-layer` 清零、`ui.js` 里既没有实验服那个 emoji 码点也没有残留的 `VESSEL_EMOJI` 表、台面与【建设】仪器商店确实改调 `CHEM.icon`、`style.css` 里 `.v-ic.wet` 与 `--ic-liq` 就位（液体画在容器内并随皮肤走）。还有一组**页面信息架构**断言守着这轮归位不回退：外壳有 `#page-segs`、6 个二级页各一枚 `.nav-badge`（实验台不留）、`panels.js` 由 `PAGES` 注册表描述页面、段点数字与角标同源于 `claimCounts`/`buyableCount` 且 `U.updateNav()` 进了 `G.refresh()`、签到在任务页（`#t-sign`）而设置页只剩指路按钮、商会订单卡片跟着 `d.orders.list`、提纯工坊在物质页、临时工作台不分段、市场恰好 6 段、四类长列表都有搜索框、方程式搜索带"未发现清单不跟着过滤"的说明、六类新组件样式齐全、关于页版本号取自 `?v=`。写这组断言时留了个坑位提醒：**本机 grep 在 `C.UTF-8` 下匹配不了 4 字节 emoji**（星平面字符会静默返回 0 命中），断言只能用中文词或结构锚点。
+- `e2e-api.sh` 额外校验：无 token 取帧 401、未知意图被拒、温度/电解设备闸门、答题防透题与一次一题、付费面三条意图（`shop.buy` / `shop.recharge` / `ad.bonus`）一律回绝、偏好持久化、游客转正并档、`PUT /api/save` 已 404、首页静态托管与离线壳清理、登录门（`js/gate.js` 随包发布 + 首页含 `#gate-root` 与忘记密码指引 + `game.js` 未登录先过门）、注册可省昵称与弱密码被拒、**令牌轮换（用一张废一张 / 宽限期内并发刷新可用 / 退出后硬撤销绝不补发 / 陌生令牌 401）**、**鉴权防爆破（连续失败转 429、锁定按账号隔离、游客档配额内可建）**、**缓存与运维面（版本化脚本 immutable、入口文档 no-cache、`X-Request-Id`、`/api/healthz` 报库连通）**；管理侧另有一组（schema 覆盖 13 类、options 候选、内容体检 0 问题覆盖 458 行、`strict` 非法写入被拒且不留脏行、`strict=false` 后门可写）、**后台账号 CRUD（建号响应不含哈希、弱口令被拒、首登 mustChange、锁定期内只放行自助改密、viewer 管不了账号、停用后旧令牌立刻失效、最后一个在岗超管动不了、测完自动清理）**、**玩家口令重置（按用户名定位、旧刷新令牌整户作废、旧口令立即 401、游客档拒绝重置）**、**运营配置说明书（`/admin/api/config/spec` 覆盖 14 个键、每条带中文名/作用/风险/出处/生效范围、`sell_rate` 标服务端结算而 `start_coins` 老实标仅前端、`recharge` 老实标已退役、库里的键必须全部收进说明书、自定义键确认不在说明书里）**、**玩家资产调整（列表带出 payload 里的余额、加金币后玩家下一次取帧即生效、只调一项不清零另一项、存档历史标为 `admin`、审计明细带前后值、扣穿/超单次上限/零增减/非整数各被拒、玩家令牌与无令牌 401）**。当前 PASS=303 / FAIL=0。断言本身不污染后续运行（限流段、建号段、资产段与临时配置键都自清理，守卫段写坏后按 V7 种子字节级还原），但**注册与游客建档是按 IP 的时间窗限流**（`chemera.guard.register-max: 20`/小时、`guest-max: 40`/小时），同一窗口内连跑多轮会在第一句 register 上撞 429——脚本现在会直接给出这句诊断并以 `exit 2` 退出，而不是让后面几十条断言级联成红；等窗口重置或重启后端（计数在内存里，重启即清零）即可再跑。变现这轮新增三组：`激励视频` 把「`ad.request` 签发并定格数量 → 假签名回调必拒且余额不动 → 用 `.env` 口令按运营模板算真签名 → 回调受理 → 同 `trans_id` 重复回调幂等 → 下一次取帧精确入账 → 整帧带 `type:ad` 事件 → 同位连点被冷却拦住 → `ad.status` 下发 6 位 4 兑换项 → 积分不足给出'还差 N'」串成一条链；`广告目录写入守卫` 对着真后台接口试 7 种会静默不发奖的配置（reward 拼错 / 缺 reward / 冷却越界 / kind 或 id 重复 / ticketTtlSec 低于引擎回落线 / 计数类数量填 0 / skin 兑换项没给合法皮肤），逐条确认被拒且**库里原值一字未改**，再写一份合法空目录、按 V7 种子恢复并做字节比对（守卫测试不留脏配置），最后确认 `/admin/api/config/ad/schema` 与后台打包产物里确实有这套类型化表单（"添加广告位""积分兑换"能在托管出来的 js 里搜到）；请求体一律走 stdin——这台机器的控制台会把 argv 里的中文按 GBK 送出去，服务端只会回"请求体无法解析"；`广告中心接线与付费面残留清理` 校验 `js/ads.js` 随包发布且 `<script>` 排在 `ui.js` 之前、`U.watchAd` 与原生 `showRewardVideo` 契约就位、把托管出来的 JS/HTML **剥掉注释后**搜 `充值` / `simAd` / `shop.recharge` / `buyDiamondItem` / `¥数字` 全部为空、设置页分段已由"商店"改名"广告"且 `drawStore` 不复存在（注释里留"充值已下线"的历史说明是允许的，代码里再出现就是真入口）。编辑/只读角色拿超管令牌调资产被拒这类**角色以库为准**的分支由 `AdminUserAssetsHttpTest` 在 HTTP 层钉住，e2e 只跑真实存在的超管与玩家两种令牌。另有一组**客户端页面结构**断言守着整页化改造：首页不再有 `#sheet`、`#stage`/`#page-body` 就位、底部导航 7 个 `data-tab`（含 `bench` 本身是一页）、实验台自带 `#quick-shelf`、`style.css` 里 `#sheet` 清零且改由 `.page.on` 驱动、`panels.js` 是 `P.go(tab)` 而非 `openTab`、回实验台会 `CHEM.fx.resize`、`ui.js` 有 `renderQuickShelf` 与 `pointercancel`/`isDragging` 守卫，以及全站 `?v=` 唯一。另有一组**容器图标**断言守着 emoji 错配不再回归：`js/icons.js` 随包发布且 `<script>` 排在 `ui.js` 之前、首页有 `#vessel-icon` 且 `#vessel-emoji`/`#liquid-layer` 清零、`ui.js` 里既没有实验服那个 emoji 码点也没有残留的 `VESSEL_EMOJI` 表、台面与【建设】仪器商店确实改调 `CHEM.icon`、`style.css` 里 `.v-ic.wet` 与 `--ic-liq` 就位（液体画在容器内并随皮肤走）。还有一组**页面信息架构**断言守着这轮归位不回退：外壳有 `#page-segs`、6 个二级页各一枚 `.nav-badge`（实验台不留）、`panels.js` 由 `PAGES` 注册表描述页面、段点数字与角标同源于 `claimCounts`/`buyableCount` 且 `U.updateNav()` 进了 `G.refresh()`、签到在任务页（`#t-sign`）而设置页只剩指路按钮、商会订单卡片跟着 `d.orders.list`、提纯工坊在物质页、临时工作台不分段、市场恰好 6 段、四类长列表都有搜索框、方程式搜索带"未发现清单不跟着过滤"的说明、六类新组件样式齐全、关于页版本号取自 `?v=`。写这组断言时留了个坑位提醒：**本机 grep 在 `C.UTF-8` 下匹配不了 4 字节 emoji**（星平面字符会静默返回 0 命中），断言只能用中文词或结构锚点。
+- 迭代 3 又加了三组。**启动链路与断线重连**（静态锚点，跟着托管出来的 js 走）：`content` 与 `me` 并发、只有只读意图（`state`/`ad.status`/`leaderboard`）配自动重放、写意图没回音改为拉权威帧对齐、退避节奏与定时器收口、启动失败自己按 1.5s→3s→6s→12s→24s→30s 重试且有 `.boot-auto` 样式，整页重载只允许留在两处有意的地方（退出壳兜底 + 换身份重进）——这条一开始写成"数出现次数 ≤1"，结果把两处合法重载也算成失败，改成"剥掉这两处后必须为空"才真正钉住意图。**内容体积**：`/api/content/shards` 报每类字节数（降序、`config` 自算一片、明细之和必须等于总数），并对 raw <220KB、gzip 必小于 raw 且 <80KB 设上限；这是留给下一次的尺子，本轮的实测结论是"按类型拆片只省 ~6%，先做命中缓存就别等网络"。**存档结构版本位**：权威帧与落库 payload 都带 `sv` 且两处同源、后台改资产不会把版本位写没、回滚到最早一版仍能载入并进游戏、回滚到不存在的版本回 404 而不是把存档写成空。会话侧的旧刻画性断言（"已签发的访问令牌在过期前仍有效"）已按 A6 翻反：重置口令后旧访问令牌立即失效、封禁当刻即踢线、解封后重登是新 `sid` 而不是把旧令牌救活。
+- 迭代 4 的 P0 两批（存档写回 + 连点 + 提审四处 + 低端 CSS + 演示通道 + 后台产物）加了这些。**存档写回**：只读意图（`state`/`ad.status`/`leaderboard`/`quiz.pickOne`）连着发三轮，`data.revision` 纹丝不动；一个写意图恰好 +1；**同一账号四笔并发购买**必须有下落——`成交数 + 撞号 stale 数 == 4`、被静默吞掉的那笔数为 0、金币只按成交回执扣、`filterpaper` 到货件数 == 成交笔数（这条第一次跑就抓出一个 MySQL S→X 锁升级死锁，症状是四笔里一笔 500，见 `docs/upgrade-plan.md` 迭代 4 第 7 节）。**广告奖励不随作废帧丢**：抢到结算权却没落盘的那一帧会把工单退回 `rewarded`，下一次取帧补发，而"退回"只动 `settled` 行，所以一张券永远只发一次。**连点**：`G.call` 这个唯一咽喉在 capture 阶段记发起按钮、飞行中 `disabled` + `.busy`、20 秒兜底解锁，e2e 打五条静态锚点，另加一条**正向刻画断言**把边界钉住：同一份 `params` 连发两次 `market.consumable` 就是真的执行两次（金币扣两笔、`filterpaper` +2）——服务端从不按"看着一样"去重；注释里写死了"连点锁 ≠ 并发安全"——跨设备／链路重发仍会执行两次，那是 F2 的 `seq` 该管的，上面那组四笔并发与这条重复执行断言就是这条边界的裁判，F2 落地之后两条都必须仍然绿。**低端 WebView**：`node test/validate.js` 里新增 `test/css-guard.js` 四条裁判（`color-mix()` 只能待在单个 `@supports` 块内、用到的 `--mix-*` 必须有定义且不许留未用定义、不许裸 `inset:`、`100dvh`/`min()`/`max()` 的函数值前面必须有同属性旧写法），`android-check.sh` 拿**APK 里那份 CSS** 再判一次——仓库绿、包里是旧的，一样红。**提审面**：`android-check.sh` 从 29 条扩到 42 条（release 合并清单不许有 `android:debuggable=true`、`exported=true` 与 LAUNCHER 数量收口、包内 `capacitor.config.json` 的 `webContentsDebuggingEnabled`/`server.url`/`androidScheme` 三态、`versionName` == 壳内 `?v=`、包内 CSS 兜底、`tapadn` provider 的 classdef 与 `NO_CONSENT` 字符串、`tapsdk-stub` 桩不许漏进产物）。**演示通道**：`dev-mode` 默认 false，`ProdHardening` 对"profile 既不是 prod 也没有 dev 却开着 dev-mode"直接拒启；广告回调先过 `RateGuard.checkAdCallback(ip)` 再比 `chemera.ad.callback-allow-ips`，**没配验签口令一律拒**（e2e 有一条专门盯这个，且 GET 形态也验）。**后台产物**：`test/admin-dist-check.sh` 把 `admin/src` 重建到 `admin/.dist-check`，先比文件清单再逐文件比哈希，红过一次的场景是"源码改了、随包 js 没重出"。
+
+- 迭代 4 的 P0 **第三批（F2 幂等 + H2 弱网收口）**加的这些。**意图幂等**：客户端每笔意图在 `G.call` 里领一个**会话内**单调 `seq`（重发用同一个号，换一笔才换号），服务端 `IntentDedupe` 按 **`(uid, sid, seq)`** 认"这一句我执行过了"，第二次交付一个字都不写、直接退回第一次那一帧（缓存的是序列化后的字符串，所以两次回执**逐字节相同**）。e2e 那一组七条断言判的就是这四件事：同 seq 只到一件货只扣一笔、`revision` 不动、两份响应体字符串相等、不同 seq 是两笔真生意；另外两条盯边界——**重新登录换了 sid 之后复用同一个号必须真执行**（否则症状是"点了没反应"，比重复扣款难查），**seq 涨出窗口（默认每会话 8 条）之后笔笔照做**（淘汰只该退回 F2 之前的水平，绝不允许吞请求）。只读意图、`stale` 回执、不带 `seq` 的旧包三处刻意不去重。**弱网与换身份**：`cloud.js` 每个请求自带 `AbortController` + 12 秒期限（`C.timeoutMs` 是可调常量），回调用闩收成**恰好一次**，超时结果不带 `code`/`tag` 所以走的是 C4 已有的静默分支（读→退避重发、写→拉权威帧对齐）；`content.js` 的首装 `fetchBundle` 共用同一个期限（它挂着不回就等于启动遮罩永远转圈）；会话**纪元** `epoch` 随每个 job 记下，落地前先比一次，上一个账号的迟到回包既不画当前界面也不回调；`stopForNewIdentity()` 把退避、对齐、挂单轮询、广告等待递归、防沉迷倒计时一起停（断网/重连那条路**不**调它，那里合法地保留轮询）；`ads.js` 的 `awaitReward` 可取消**且必交代**——被顶替的那一路也回调用方一次，否则复活／双倍券按钮会永远卡在禁用态。回归新加一层 `test/cloud-timeout.js`（挂在 `node test/validate.js` 第 1 层）：`vm` 载真实的 `cloud.js`，注入六种坏 `fetch`（挂死／可中断／迟到正文／非 JSON／解析失败／直接 reject），把期限压到 30ms 判"回调恰好来一次、而且不是误报成超时"；把 `raw()` 换回改动前那版重跑，它报 15 条错，所以这层不是空转。
 
 ## 已知边界
 
 - 断网即不可玩（这是"在线游戏"的定义）；页面会停在启动门并提示启动后端。
-- 挑战/沙盒的临时现场存在每 uid 的内存 `EngineCtx`，多实例部署需会话粘滞或把它外置（当前为单实例设计）。
+- 挑战/沙盒的临时现场存在每 uid 的内存 `EngineCtx`，多实例部署需会话粘滞或把它外置（当前为单实例设计）。复查补一条：这类内存 map（含鉴权限流的 `RateGuard`）**没有上界**，不做淘汰的话单实例跑久了也会被自己撑爆——见 `docs/upgrade-plan.md` 迭代 4 的 G7。
 - 排行榜是"全体玩家收集进度"的服务端计算快照，按天缓存于客户端。
-- 意图端点不带幂等序号：网络重试会被当作两次合法意图重复结算，正式运营前需补客户端 `seq` 去重（见后续清单）。
+- 意图幂等窗口是**进程内**的（`IntentDedupe`，每会话最近 8 条 / 全局 400 个玩家，LRU 淘汰）：同一实例上的重发只结算一次，**多实例扩容时各认各的**，横向扩容前必须把它与 `EngineCtx`、`RateGuard` 一起外置或做会话粘滞（同一个边界，见 G7）。另外它只覆盖"发了 `seq` 的客户端"——**旧安装包不发 `seq`，行为与 F2 之前完全一致**（不做任何猜测式去重），所以这条防线要等玩家更新到新版才生效，靠 `/api/app/version` 的版本门推上去。
 - 鉴权限流与刷新令牌宽限都是**单实例内存态**：横向扩容时每台各算各的额度（重启即清零）。要么保持单实例，要么把它外置（与 `EngineCtx` 会话外置同一批做）。
 - 后台内容管理尚不能覆盖引擎写死项（成就判定条件、等级曲线、事故常数），也没有内容版本历史——详见 `docs/content-management-followups.md`。后台账号本身已可在【管理员账号】页增删改查，prod 带着 `admin123` 这类公开口令会拒绝启动。
-- **访问令牌不绑定会话**（玩家侧）：封禁、改密、重置口令都只能作废刷新令牌，已签发的访问令牌在自然过期前（≤2 小时）仍然可用。后台侧已经每请求回查账号表，玩家侧还没做——补齐方案见 `docs/upgrade-plan.md` 的 A6（令牌带 `sid`，鉴权时查一次会话行）。
+- **访问令牌已绑定会话**（A6，迭代 3）：玩家访问令牌带 `sid`（`user_session` 行主键），`AuthInterceptor` 每请求查一次会话行，所以封禁、改密、重置口令**当场踢线**，不再有 ≤2h 的空窗；代价是这套上线那一刻历史令牌全失效，玩家需重登一次。这条 `sid` 现在还是**两处判断的依据**：存档写回带它做乐观锁的号（F1：撞号就重读重放，不再后写覆盖前写），意图幂等把它放进键里（F2：`(uid, sid, seq)`）——因为客户端的 `seq` 是会话内自增的，重登后又从 1 数起，只按 uid 认会把重登后的第一句意图当成"已经执行过"而**静默不执行**。
+- **激励视频的签名口径未经真实平台验证**：Dirichlet 文档只写"trans_id 结合安全密钥做 SHA256"，没写死拼接顺序与大小写，所以模板与大小写都做成了可配（`CHEMERA_AD_SIGN_TEMPLATE` / `_SIGN_HEX`）。本地回归跑的是同一条验签代码、自配口令，**上线前必须拿首笔真实回调比对一次**；回执格式同理（`_CALLBACK_ACK` 提供 json/text 两态）。原生播放桥 `window.ChemeraAd.showRewardVideo({spaceId, extra, rewardName, rewardAmount, userId, transId})` 的 Capacitor 插件已在 `android/app/src/main/java/com/chemera/game/ChemeraAdPlugin.java` 就位，缺的是 TapADN 的 `.aar` 与真实密钥（`app/libs/*.aar` 不在时插件明确回"未内置"，不假装播完）；浏览器里看到的是带"演示"标注的倒计时动画 + 服务端演示通道。
