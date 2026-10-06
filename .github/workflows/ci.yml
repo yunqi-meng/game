@@ -1,0 +1,126 @@
+name: 回归流水线
+
+# 挂在 Linux 上跑是刻意的：test/e2e-api.sh 往 curl 里塞的是中文请求体，
+# Windows 控制台会把 argv 按 GBK 编码送出去，服务端只会回"请求体无法解析"——
+# 看着像服务端坏了，其实是 runner 的字符集。Linux 天然 UTF-8，同一份脚本不用改一行。
+#
+# 凭证口径与本机一致：这个文件里没有任何字面口令。MySQL、超管、JWT 三套口令都是
+# 每次作业现生成（openssl 随机串），先 ::add-mask:: 登记再写进 $GITHUB_ENV，
+# 作业结束容器就销毁。想复用这套流程跑真机/线上，请改用仓库 secrets。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.UTF-8
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 口令在这里生成，不在任何提交里出现；add-mask 让后续步骤把它们打码成 ***
+      # 广告验签口令也一起生成：test/e2e-api.sh 里"真签名回调被受理"那条要走线上 SSV 路径，
+      # 没有它就只能演"假签名被拒"，而线上最常坏的恰恰是真签名那一支（模板/大小写口径）。
+      - name: 生成一次性口令
+        run: |
+          gen() { openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20; }
+          for v in MYSQL_ROOT_PASSWORD CHEMERA_DB_PASSWORD CHEMERA_BACKUP_PASSWORD \
+                   CHEMERA_JWT_SECRET CHEMERA_SEED_ADMIN_PASS CHEMERA_AD_SECURITY_KEY; do
+            val=$(gen)
+            echo "::add-mask::$val"
+            echo "$v=$val" >> "$GITHUB_ENV"
+          done
+
+      - name: 起 MySQL 8
+        run: |
+          docker run -d --name chemera-mysql \
+            -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+            -p 3306:3306 \
+            mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+          for i in $(seq 1 60); do
+            docker exec chemera-mysql mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent && break
+            sleep 2
+          done
+
+      # 建库 + 应用账号走仓库里那份 bootstrap.sql：CI 与本地用同一条初始化路径，
+      # 免得"本地能跑、CI 跑不了"变成第 N 个只有一个人知道的坑。
+      - name: 初始化库与账号 (server/db/bootstrap.sql)
+        run: |
+          export CHEMERA_DB_PASSWORD CHEMERA_BACKUP_PASSWORD
+          envsubst < server/db/bootstrap.sql | docker exec -i chemera-mysql mysql -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD"
+
+      # 后台是"产物入库、jar 直出"的形态：pom 里没有前端插件，mvn 只会把 static/admin 原样打包。
+      # 所以 CI 必须自己重出一次，并且断言重出来的就是仓库里那份——否则干净检出的 jar 里
+      # 装的是某次本地构建忘了提交的快照，本地怎么跑都绿（迭代 4 的 F6）。
+      - name: 重建管理后台 (admin)
+        working-directory: admin
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: 断言随包后台产物已入库
+        run: |
+          DIR=server/src/main/resources/static/admin
+          git add -A -- "$DIR"            # 让 vite 新产出的哈希文件名也进入比对（untracked 不在 git diff 的射程里）
+          if ! git diff --cached --quiet -- "$DIR"; then
+            echo "✗ $DIR 与 admin/src 当前代码重出来的产物不一致：仓库里那份是旧的（或忘了提交）。"
+            git status --porcelain -- "$DIR" | sed -n '1,20p'
+            echo "  出路：cd admin && npm run build，把 $DIR 的增删改一并提交。"
+            exit 1
+          fi
+          echo "✓ 随包后台产物与源码同源"
+
+      - name: 打包（含后台 SPA 与 H5 客户端随包发布）
+        run: mvn -B -ntp -f server/pom.xml package -DskipTests
+
+      - name: 启动后端（Flyway 建表 + 种子内容）
+        run: |
+          export CHEMERA_DB_HOST=127.0.0.1 CHEMERA_DB_PORT=3306 CHEMERA_DB_NAME=chemera \
+                 CHEMERA_DB_USER=chem CHEMERA_SEED_ADMIN_USER=admin \
+                 SPRING_PROFILES_ACTIVE=mysql,dev
+          # dev profile 是演示通道的唯一入口（application-dev.yml 里才打开 ad/taptap 的 dev-mode）。
+          # 以前这里靠 CHEMERA_AD_DEV_MODE=true 硬开，而 ProdHardening 现在会拦"开着它却没挂 dev profile"
+          # 的实例——那正是 F5 要堵的漏：README 教 mysql,prod，漏一个 profile 就把提款机挂到公网上。
+          nohup java -jar server/target/chemera-server.jar > /tmp/chemera-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s -m 2 http://localhost:8080/api/healthz | grep -q '"db":true' && { echo "ready after ${i}s"; exit 0; }
+            sleep 2
+          done
+          echo "后端 2 分钟没就绪，把启动日志打出来再失败"
+          tail -80 /tmp/chemera-server.log
+          exit 1
+
+      # MVN_FLAGS= 是为了冷缓存：test/ci.sh 默认带 -o（离线），本机 .m2 早就满了能省几分钟，
+      # 而全新 runner 第一个依赖就解析不到，会把整条流水线红在环境上而不是代码上。
+      - name: 全量回归 (test/ci.sh)
+        env:
+          MVN_FLAGS: ""
+        run: bash test/ci.sh http://localhost:8080
+
+      - name: 失败时留证据
+        if: failure()
+        run: |
+          echo "=== 后端日志尾部 ==="; tail -120 /tmp/chemera-server.log || true
+          mkdir -p /tmp/ci-artifacts && cp /tmp/chemera-server.log /tmp/ci-artifacts/ 2>/dev/null || true
+      - name: 上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chemera-server-log
+          path: /tmp/ci-artifacts/chemera-server.log
+          if-no-files-found: ignore
+          retention-days: 7

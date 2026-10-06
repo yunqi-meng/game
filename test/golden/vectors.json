@@ -1,0 +1,3006 @@
+[
+  {
+    "id": "neutralize-beaker",
+    "why": "最普通的一次成功结算：常温中和、首次见到产物。钉住候选顺序、取整后的经验与两笔发现奖金（产物各一次＋方程式首次奖金）。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "NaOH": 1,
+        "NaCl": 1,
+        "H2O": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 5,
+        "NaOH|0": 5
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 1,
+        "NaOH": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0
+        },
+        {
+          "id": "NaCl",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        },
+        {
+          "id": "H2O"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R060"
+      ],
+      "pickId": "R060",
+      "eq": "HCl + NaOH = NaCl + H₂O",
+      "fx": [
+        "colorchange"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 220,
+        "worth": 100
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0,
+          "buy": 108,
+          "sell": 76
+        },
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 48,
+          "sell": 34
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        },
+        {
+          "id": "H2O",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R060",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2O": 1,
+          "NaCl": 1
+        },
+        "exp": 20,
+        "ups": 0,
+        "eqBonus": 48,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 238,
+        "levelAfter": 8,
+        "expAfter": 20,
+        "bagDelta": {
+          "H2O|0": 1,
+          "NaCl|0": 1
+        },
+        "discoveredNew": [
+          "H2O",
+          "NaCl"
+        ]
+      }
+    }
+  },
+  {
+    "id": "neutralize-analysis-phmeter",
+    "why": "房间加成×1.3 与酸度计对中和/复分解的×1.2 叠在一条经验上，取整顺序错了结果就差 1 点。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "analysis",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "NaOH": 1,
+        "NaCl": 1,
+        "H2O": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {
+        "phmeter": true
+      },
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 5,
+        "NaOH|0": 5
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        },
+        "NaCl": {
+          "times": 1,
+          "first": 0
+        },
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {
+        "R060": true
+      },
+      "firstBonusTaken": {
+        "NaCl": true,
+        "H2O": true
+      }
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 1,
+        "NaOH": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R060"
+      ],
+      "pickId": "R060",
+      "eq": "HCl + NaOH = NaCl + H₂O",
+      "fx": [
+        "colorchange"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 220,
+        "worth": 100
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 48,
+          "sell": 22
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R060",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2O": 1,
+          "NaCl": 1
+        },
+        "exp": 31,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 0,
+        "levelAfter": 8,
+        "expAfter": 31,
+        "bagDelta": {
+          "H2O|0": 1,
+          "NaCl|0": 1
+        },
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "ratio-siblings-glucose",
+    "why": "同反应物不同配比的兄弟（R036 碳酸 / R124 光合）。台面刚好被 6:6 消耗干净的是 R124，而客户端以前取 matches()[0] 会指着 R036 报价——H1 抓出来的那条真分叉。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 16,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "organic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "CO2": 1,
+        "H2O": 1,
+        "C6H12O6": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "CO2|0": 8,
+        "H2O|0": 8
+      },
+      "discovered": {
+        "CO2": {
+          "times": 1,
+          "first": 0
+        },
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "CO2": 6,
+        "H2O": 6
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "CO2",
+          "q": 0
+        },
+        {
+          "id": "C6H12O6",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "C6H12O6"
+        },
+        {
+          "id": "H2CO3"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R036",
+        "R124"
+      ],
+      "pickId": "R124",
+      "eq": "6CO₂ + 6H₂O —光照/叶绿体→ C₆H₁₂O₆ + 6O₂",
+      "fx": [
+        "bubble",
+        "glow"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 690,
+        "worth": 500
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "CO2",
+          "q": 0,
+          "buy": 66,
+          "sell": 46
+        },
+        {
+          "id": "C6H12O6",
+          "q": 0,
+          "buy": 240,
+          "sell": 168
+        }
+      ],
+      "bonus": [
+        {
+          "id": "C6H12O6",
+          "plain": 560,
+          "forReaction": 280
+        },
+        {
+          "id": "H2CO3",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R124",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "C6H12O6": 1,
+          "O2": 6
+        },
+        "exp": 104,
+        "ups": 0,
+        "eqBonus": 155,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 775,
+        "levelAfter": 16,
+        "expAfter": 104,
+        "bagDelta": {
+          "C6H12O6|0": 1,
+          "O2|0": 6
+        },
+        "discoveredNew": [
+          "C6H12O6",
+          "O2"
+        ]
+      }
+    }
+  },
+  {
+    "id": "catalyst-heat-r001",
+    "why": "催化剂＋加热＋指定容器：MnO₂ 挂在台面上不算多余投放、也不参与倍率钳位；批量问 2 就结算 2。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "KClO3": 1,
+        "MnO2": 1,
+        "KCl": 1,
+        "O2": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {
+        "lamp": true
+      },
+      "vessels": {
+        "testtube": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "KClO3|0": 4,
+        "MnO2|0": 1
+      },
+      "discovered": {
+        "KClO3": {
+          "times": 1,
+          "first": 0
+        },
+        "MnO2": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "testtube",
+      "placed": {
+        "KClO3": 4,
+        "MnO2": 1
+      },
+      "temp": "heat",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 2,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "KClO3",
+          "q": 0
+        },
+        {
+          "id": "MnO2",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "KCl"
+        },
+        {
+          "id": "O2"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R001"
+      ],
+      "pickId": "R001",
+      "eq": "2KClO₃ —MnO₂/△→ 2KCl + 3O₂↑",
+      "fx": [
+        "bubble",
+        "smoke"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 2,
+      "cost": {
+        "cost": 1800,
+        "worth": 270
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "KClO3",
+          "q": 0,
+          "buy": 1080,
+          "sell": 756
+        },
+        {
+          "id": "MnO2",
+          "q": 0,
+          "buy": 276,
+          "sell": 193
+        }
+      ],
+      "bonus": [
+        {
+          "id": "KCl",
+          "plain": 170,
+          "forReaction": 85
+        },
+        {
+          "id": "O2",
+          "plain": 60,
+          "forReaction": 30
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R001",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "KCl": 4,
+          "O2": 6
+        },
+        "exp": 80,
+        "ups": 0,
+        "eqBonus": 58,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 288,
+        "levelAfter": 8,
+        "expAfter": 80,
+        "bagDelta": {
+          "KCl|0": 4,
+          "MnO2|0": 1,
+          "O2|0": 6
+        },
+        "discoveredNew": [
+          "KCl",
+          "O2"
+        ]
+      }
+    }
+  },
+  {
+    "id": "danger-boom-kclo3-s",
+    "why": "危险混放（D01）直接炸台：候选为空时不看随机数就判炸，损失按原料原价×(loss_base−安全减免)×loss_ratio，再进一块废渣。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "KClO3": 1,
+        "S": 1,
+        "SLAG": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "mortar": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "KClO3|0": 1,
+        "S|0": 1
+      },
+      "discovered": {
+        "KClO3": {
+          "times": 1,
+          "first": 0
+        },
+        "S": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "mortar",
+      "placed": {
+        "KClO3": 1,
+        "S": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.1,
+    "probe": {
+      "prices": [
+        {
+          "id": "KClO3",
+          "q": 0
+        },
+        {
+          "id": "S",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [],
+      "pickId": null,
+      "eq": null,
+      "fx": [],
+      "danger": true,
+      "dangerId": "D01",
+      "batchCap": 10,
+      "maxMultiplier": null,
+      "cost": null,
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "KClO3",
+          "q": 0,
+          "buy": 1080,
+          "sell": 756
+        },
+        {
+          "id": "S",
+          "q": 0,
+          "buy": 12,
+          "sell": 8
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "boom",
+        "reactionId": null,
+        "procId": null,
+        "suggestId": null,
+        "produced": {},
+        "exp": 0,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 910,
+        "coinsDelta": -290,
+        "levelAfter": 8,
+        "expAfter": 0,
+        "bagDelta": {
+          "SLAG|0": 1
+        },
+        "discoveredNew": [
+          "SLAG"
+        ]
+      }
+    }
+  },
+  {
+    "id": "danger-insured-refund",
+    "why": "同一锅危险 mix 提前买了实验保险：理赔按 insured_refund×原价合计，安全设施只减免损失侧，所以金币差额必须是\"扣得少、赔得多\"的那个数。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "KClO3": 1,
+        "S": 1,
+        "SLAG": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 2,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "mortar": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "KClO3|0": 1,
+        "S|0": 1
+      },
+      "discovered": {
+        "KClO3": {
+          "times": 1,
+          "first": 0
+        },
+        "S": {
+          "times": 1,
+          "first": 0
+        },
+        "SLAG": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "mortar",
+      "placed": {
+        "KClO3": 1,
+        "S": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": true
+    },
+    "rng": 0.1,
+    "probe": {
+      "prices": [
+        {
+          "id": "SLAG",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [],
+      "pickId": null,
+      "eq": null,
+      "fx": [],
+      "danger": true,
+      "dangerId": "D01",
+      "batchCap": 10,
+      "maxMultiplier": null,
+      "cost": null,
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "SLAG",
+          "q": 0,
+          "buy": 6,
+          "sell": 4
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "boom",
+        "reactionId": null,
+        "procId": null,
+        "suggestId": null,
+        "produced": {},
+        "exp": 0,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 910,
+        "coinsDelta": 155,
+        "levelAfter": 8,
+        "expAfter": 0,
+        "bagDelta": {
+          "SLAG|0": 1
+        },
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "electrolysis-water",
+    "why": "电解开关必须与条件严格相等：通电才匹配 R007，产物里有单质（发现奖金走定额那一档）。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "physchem",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "H2O": 1,
+        "H2": 1,
+        "O2": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {
+        "electrolyzer": true
+      },
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "H2O|0": 6
+      },
+      "discovered": {
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "H2O": 4
+      },
+      "temp": "room",
+      "electrolysis": true
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "H2",
+          "q": 0
+        },
+        {
+          "id": "O2",
+          "q": 0
+        },
+        {
+          "id": "H2O",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "H2"
+        },
+        {
+          "id": "O2"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R007"
+      ],
+      "pickId": "R007",
+      "eq": "2H₂O —通电→ 2H₂↑ + O₂↑",
+      "fx": [
+        "bubble",
+        "glow"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 2,
+      "cost": {
+        "cost": 120,
+        "worth": 140
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "H2",
+          "q": 0,
+          "buy": 54,
+          "sell": 38
+        },
+        {
+          "id": "O2",
+          "q": 0,
+          "buy": 60,
+          "sell": 42
+        },
+        {
+          "id": "H2O",
+          "q": 0,
+          "buy": 72,
+          "sell": 50
+        }
+      ],
+      "bonus": [
+        {
+          "id": "H2",
+          "plain": 60,
+          "forReaction": 30
+        },
+        {
+          "id": "O2",
+          "plain": 60,
+          "forReaction": 30
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R007",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2": 2,
+          "O2": 1
+        },
+        "exp": 39,
+        "ups": 0,
+        "eqBonus": 30,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 150,
+        "levelAfter": 8,
+        "expAfter": 39,
+        "bagDelta": {
+          "H2O|0": 2,
+          "H2|0": 2,
+          "O2|0": 1
+        },
+        "discoveredNew": [
+          "H2",
+          "O2"
+        ]
+      }
+    }
+  },
+  {
+    "id": "electrolysis-switch-off",
+    "why": "同一台面把电解关掉：真实模式下条件不符，候选必须为空；服务端回 fail-cond 并给出\"检查条件\"的那条建议方程式。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "physchem",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "H2O": 1,
+        "H2": 1,
+        "O2": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {
+        "electrolyzer": true
+      },
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "H2O|0": 6
+      },
+      "discovered": {
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "H2O": 4
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "H2O",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "H2O"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [],
+      "pickId": null,
+      "eq": null,
+      "fx": [],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": null,
+      "cost": null,
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "H2O",
+          "q": 0,
+          "buy": 72,
+          "sell": 50
+        }
+      ],
+      "bonus": [
+        {
+          "id": "H2O",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "fail-cond",
+        "reactionId": null,
+        "procId": null,
+        "suggestId": "R007",
+        "produced": {},
+        "exp": 0,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 0,
+        "levelAfter": 8,
+        "expAfter": 0,
+        "bagDelta": {},
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "process-filter",
+    "why": "工艺（过滤粗盐）：工艺永远排候选第一位、扣一次滤纸、产物按声明的 q=1 入库。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "analysis",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "NaCl": 1,
+        "SLAG": 1,
+        "filterpaper": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "funnel": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "NaCl|0": 5,
+        "SLAG|0": 4,
+        "filterpaper|0": 2
+      },
+      "discovered": {
+        "NaCl": {
+          "times": 1,
+          "first": 0
+        },
+        "SLAG": {
+          "times": 1,
+          "first": 0
+        },
+        "filterpaper": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "funnel",
+      "placed": {
+        "SLAG": 2,
+        "NaCl": 2
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0
+        },
+        {
+          "id": "NaCl",
+          "q": 1
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "P01"
+      ],
+      "pickId": "P01",
+      "eq": "过滤：除去粗盐中的不溶性杂质",
+      "fx": [
+        "dissolve"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 90,
+        "worth": 80
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 48,
+          "sell": 34
+        },
+        {
+          "id": "NaCl",
+          "q": 1,
+          "buy": 48,
+          "sell": 48
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": null,
+        "procId": "P01",
+        "suggestId": null,
+        "produced": {
+          "NaCl": 2
+        },
+        "exp": 15,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 0,
+        "levelAfter": 8,
+        "expAfter": 15,
+        "bagDelta": {
+          "NaCl|1": 2,
+          "filterpaper|0": -1
+        },
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "boom-unknown-mix",
+    "why": "谁都不反应的组合（含一条内容表里查不到的物质 id，模拟改包存档）：废渣＋清理费，未知物质必须与客户端预览用同一个兜底价。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "SLAG": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 3
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 1,
+        "UNKNOWN_XYZ": 2
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0
+        },
+        {
+          "id": "UNKNOWN_XYZ",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG"
+        },
+        {
+          "id": "UNKNOWN_XYZ"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [],
+      "pickId": null,
+      "eq": null,
+      "fx": [],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": null,
+      "cost": null,
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0,
+          "buy": 108,
+          "sell": 76
+        },
+        {
+          "id": "UNKNOWN_XYZ",
+          "q": 0,
+          "buy": 999999,
+          "sell": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG",
+          "plain": 120,
+          "forReaction": 60
+        },
+        {
+          "id": "UNKNOWN_XYZ",
+          "plain": 0,
+          "forReaction": 0
+        }
+      ],
+      "react": {
+        "kind": "boom",
+        "reactionId": null,
+        "procId": null,
+        "suggestId": null,
+        "produced": {},
+        "exp": 0,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 130,
+        "coinsDelta": 61,
+        "levelAfter": 8,
+        "expAfter": 0,
+        "bagDelta": {
+          "SLAG|0": 1
+        },
+        "discoveredNew": [
+          "SLAG"
+        ]
+      }
+    }
+  },
+  {
+    "id": "noheat-vessel-boom",
+    "why": "容量瓶写着不可加热：一进高温直接炸台，哪怕配方本身完全正确（这条发生在取随机数之前，所以任何 rng 都判炸）。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "analysis",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "NaOH": 1,
+        "SLAG": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {
+        "lamp": true
+      },
+      "vessels": {
+        "volumetric": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 3,
+        "NaOH|0": 3
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "volumetric",
+      "placed": {
+        "HCl": 1,
+        "NaOH": 1
+      },
+      "temp": "heat",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.9,
+    "probe": {
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [],
+      "pickId": null,
+      "eq": null,
+      "fx": [],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 15,
+      "maxMultiplier": null,
+      "cost": null,
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0,
+          "buy": 108,
+          "sell": 76
+        }
+      ],
+      "bonus": [
+        {
+          "id": "SLAG",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "boom",
+        "reactionId": null,
+        "procId": null,
+        "suggestId": null,
+        "produced": {},
+        "exp": 0,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 220,
+        "coinsDelta": 21,
+        "levelAfter": 8,
+        "expAfter": 0,
+        "bagDelta": {
+          "SLAG|0": 1
+        },
+        "discoveredNew": [
+          "SLAG"
+        ]
+      }
+    }
+  },
+  {
+    "id": "hazard-partial-fee",
+    "why": "危险药品（hazard 的 FeS+2HCl）成功但要付冲击修复费：kind=partial，费用 = repair_base + 反应经验×repair_exp_mult，并被余额封顶。rng 卡在 0.05（产率折半线）与 0.08（冲击线，安全 5 级的下限）之间：这条钉的是 partial 那一档，不该顺带把产率事故也测了。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "FeS": 1,
+        "HCl": 1,
+        "FeCl2": 1,
+        "H2S": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 5,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "testtube": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "FeS|0": 2,
+        "HCl|0": 4
+      },
+      "discovered": {
+        "FeS": {
+          "times": 1,
+          "first": 0
+        },
+        "HCl": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "testtube",
+      "placed": {
+        "FeS": 1,
+        "HCl": 2
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.06,
+    "probe": {
+      "prices": [
+        {
+          "id": "FeS",
+          "q": 0
+        },
+        {
+          "id": "H2S",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "FeCl2"
+        },
+        {
+          "id": "H2S"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R140"
+      ],
+      "pickId": "R140",
+      "eq": "FeS + 2HCl = FeCl₂ + H₂S↑",
+      "fx": [
+        "bubble",
+        "dissolve"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 400,
+        "worth": 1090
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "FeS",
+          "q": 0,
+          "buy": 264,
+          "sell": 185
+        },
+        {
+          "id": "H2S",
+          "q": 0,
+          "buy": 1056,
+          "sell": 739
+        }
+      ],
+      "bonus": [
+        {
+          "id": "FeCl2",
+          "plain": 250,
+          "forReaction": 125
+        },
+        {
+          "id": "H2S",
+          "plain": 840,
+          "forReaction": 420
+        }
+      ],
+      "react": {
+        "kind": "partial",
+        "reactionId": "R140",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "FeCl2": 1,
+          "H2S": 1
+        },
+        "exp": 40,
+        "ups": 0,
+        "eqBonus": 273,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 1183,
+        "levelAfter": 8,
+        "expAfter": 40,
+        "bagDelta": {
+          "FeCl2|0": 1,
+          "H2S|0": 1
+        },
+        "discoveredNew": [
+          "FeCl2",
+          "H2S"
+        ]
+      }
+    }
+  },
+  {
+    "id": "low-yield-halve",
+    "why": "低概率产率事故（rng 落在 failChance 之下）：每种产物折半但最少留 1，批量 2 时看得出现，yieldWarn 必须带出去。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "NaOH": 1,
+        "NaCl": 1,
+        "H2O": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 6,
+        "NaOH|0": 6
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        },
+        "NaCl": {
+          "times": 1,
+          "first": 0
+        },
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {
+        "R060": true
+      },
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 2,
+        "NaOH": 2
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 2,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.02,
+    "probe": {
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R060"
+      ],
+      "pickId": "R060",
+      "eq": "HCl + NaOH = NaCl + H₂O",
+      "fx": [
+        "colorchange"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 2,
+      "cost": {
+        "cost": 220,
+        "worth": 100
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 48,
+          "sell": 34
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R060",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2O": 1,
+          "NaCl": 1
+        },
+        "exp": 40,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": true,
+        "lossVal": 0,
+        "coinsDelta": 0,
+        "levelAfter": 8,
+        "expAfter": 40,
+        "bagDelta": {
+          "H2O|0": 1,
+          "NaCl|0": 1
+        },
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "batch-cap-bench3",
+    "why": "批量钳位：工作台 3 级起上限 20，容量瓶 batchBonus 再 +5，而台面只有 4 份水、配比 2 → 问 10 也只能结算 5。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "physchem",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "H2O": 1,
+        "H2": 1,
+        "O2": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 3
+      },
+      "equipment": {
+        "electrolyzer": true
+      },
+      "vessels": {
+        "volumetric": {
+          "owned": true,
+          "tier": 1
+        }
+      },
+      "bag": {
+        "H2O|0": 10
+      },
+      "discovered": {
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "volumetric",
+      "placed": {
+        "H2O": 10
+      },
+      "temp": "room",
+      "electrolysis": true
+    },
+    "mode": {
+      "multiplier": 10,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "H2O",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "H2"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R007"
+      ],
+      "pickId": "R007",
+      "eq": "2H₂O —通电→ 2H₂↑ + O₂↑",
+      "fx": [
+        "bubble",
+        "glow"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 25,
+      "maxMultiplier": 5,
+      "cost": {
+        "cost": 120,
+        "worth": 140
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "H2O",
+          "q": 0,
+          "buy": 72,
+          "sell": 50
+        }
+      ],
+      "bonus": [
+        {
+          "id": "H2",
+          "plain": 60,
+          "forReaction": 30
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R007",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2": 10,
+          "O2": 5
+        },
+        "exp": 195,
+        "ups": 0,
+        "eqBonus": 30,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 150,
+        "levelAfter": 8,
+        "expAfter": 195,
+        "bagDelta": {
+          "H2|1": 10,
+          "O2|1": 5
+        },
+        "discoveredNew": [
+          "H2",
+          "O2"
+        ]
+      }
+    }
+  },
+  {
+    "id": "sandbox-no-settle",
+    "why": "创意沙盒：候选与危险判定和真实模式一模一样，但不产东西、不扣料、不发奖金，经验也不进档——玩家看得见预测，看不见结算。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "NaOH": 1,
+        "NaCl": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 2,
+        "NaOH|0": 2
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 1,
+        "NaOH": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": true,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R060"
+      ],
+      "pickId": "R060",
+      "eq": "HCl + NaOH = NaCl + H₂O",
+      "fx": [
+        "colorchange"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 220,
+        "worth": 100
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 48,
+          "sell": 34
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R060",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2O": 1,
+          "NaCl": 1
+        },
+        "exp": 20,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 0,
+        "levelAfter": 8,
+        "expAfter": 0,
+        "bagDelta": {},
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "rep-regular-tier",
+    "why": "商会声望\"常客\"档：买价倍率 1.16、挂单速度 0.88 都会印在面板上，而 drift 由服务端每日下发——三者相乘的那个数两端必须一样。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 20,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1.05,
+        "NaOH": 0.94,
+        "NaCl": 1.12,
+        "H2O": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 5,
+        "NaOH|0": 5
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {
+        "R060": true
+      },
+      "firstBonusTaken": {
+        "NaCl": true
+      }
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 1,
+        "NaOH": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0
+        },
+        {
+          "id": "NaOH",
+          "q": 0
+        },
+        {
+          "id": "NaCl",
+          "q": 0
+        },
+        {
+          "id": "NaCl",
+          "q": 1
+        },
+        {
+          "id": "NaCl",
+          "q": 2
+        },
+        {
+          "id": "H2O",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        },
+        {
+          "id": "H2O"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R060"
+      ],
+      "pickId": "R060",
+      "eq": "HCl + NaOH = NaCl + H₂O",
+      "fx": [
+        "colorchange"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 220,
+        "worth": 100
+      },
+      "repTier": {
+        "zh": "常客",
+        "buyRate": 1.16,
+        "speed": 0.88
+      },
+      "prices": [
+        {
+          "id": "HCl",
+          "q": 0,
+          "buy": 110,
+          "sell": 79
+        },
+        {
+          "id": "NaOH",
+          "q": 0,
+          "buy": 142,
+          "sell": 103
+        },
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 52,
+          "sell": 25
+        },
+        {
+          "id": "NaCl",
+          "q": 1,
+          "buy": 52,
+          "sell": 36
+        },
+        {
+          "id": "NaCl",
+          "q": 2,
+          "buy": 52,
+          "sell": 54
+        },
+        {
+          "id": "H2O",
+          "q": 0,
+          "buy": 70,
+          "sell": 50
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        },
+        {
+          "id": "H2O",
+          "plain": 120,
+          "forReaction": 60
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R060",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2O": 1,
+          "NaCl": 1
+        },
+        "exp": 20,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 190,
+        "levelAfter": 8,
+        "expAfter": 20,
+        "bagDelta": {
+          "H2O|0": 1,
+          "NaCl|0": 1
+        },
+        "discoveredNew": [
+          "H2O",
+          "NaCl"
+        ]
+      }
+    }
+  },
+  {
+    "id": "spotplate-precip-yield",
+    "why": "点滴板对\"沉淀反应\"额外 +5% 产率：加成跟着真正结算的那条走，而不是跟着候选列表第一条。R071 指定试管，所以这条跑在非真实模式（条件宽松档）——同时钉住\"条件闸门只在 realMode 生效\"。产率折红线带加成是 0.10、漏掉那 5% 是 0.15，rng=0.12 落在两者之间：漏了加成这条就红，且不靠浮点相等碰运气。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": false,
+      "room": "analysis",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "NaCl": 1,
+        "AgNO3": 1,
+        "AgCl": 1,
+        "NaNO3": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "spotplate": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "NaCl|0": 4,
+        "AgNO3|0": 4
+      },
+      "discovered": {
+        "NaCl": {
+          "times": 1,
+          "first": 0
+        },
+        "AgNO3": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "spotplate",
+      "placed": {
+        "NaCl": 1,
+        "AgNO3": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.12,
+    "probe": {
+      "prices": [
+        {
+          "id": "AgCl",
+          "q": 0
+        },
+        {
+          "id": "AgNO3",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "AgCl"
+        },
+        {
+          "id": "NaNO3"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R071"
+      ],
+      "pickId": "R071",
+      "eq": "NaCl + AgNO₃ = AgCl↓ + NaNO₃",
+      "fx": [
+        "precip"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 1540,
+        "worth": 810
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "AgCl",
+          "q": 0,
+          "buy": 720,
+          "sell": 504
+        },
+        {
+          "id": "AgNO3",
+          "q": 0,
+          "buy": 1800,
+          "sell": 1260
+        }
+      ],
+      "bonus": [
+        {
+          "id": "AgCl",
+          "plain": 710,
+          "forReaction": 355
+        },
+        {
+          "id": "NaNO3",
+          "plain": 330,
+          "forReaction": 165
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R071",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "AgCl": 1,
+          "NaNO3": 1
+        },
+        "exp": 33,
+        "ups": 0,
+        "eqBonus": 260,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 1300,
+        "levelAfter": 8,
+        "expAfter": 33,
+        "bagDelta": {
+          "AgCl|0": 1,
+          "NaNO3|0": 1
+        },
+        "discoveredNew": [
+          "AgCl",
+          "NaNO3"
+        ]
+      }
+    }
+  },
+  {
+    "id": "level-up-crossing",
+    "why": "在途经验跨过 need(1) 那一档：升 1 级、余经验落回 50。钉的是 app_config.level_exp（base 80 / coef 25）这条曲线与 addExp 的循环——改曲线不改这里就会红，而面板上的经验条会跟着倒退。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 1,
+      "exp": 75,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "KClO3": 1,
+        "MnO2": 1,
+        "KCl": 1,
+        "O2": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {
+        "lamp": true
+      },
+      "vessels": {
+        "testtube": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "KClO3|0": 4,
+        "MnO2|0": 1
+      },
+      "discovered": {
+        "KClO3": {
+          "times": 1,
+          "first": 0
+        },
+        "MnO2": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "testtube",
+      "placed": {
+        "KClO3": 4,
+        "MnO2": 1
+      },
+      "temp": "heat",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 2,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "KCl",
+          "q": 0
+        },
+        {
+          "id": "O2",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "KCl"
+        },
+        {
+          "id": "O2"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R001"
+      ],
+      "pickId": "R001",
+      "eq": "2KClO₃ —MnO₂/△→ 2KCl + 3O₂↑",
+      "fx": [
+        "bubble",
+        "smoke"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 2,
+      "cost": {
+        "cost": 1800,
+        "worth": 270
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "KCl",
+          "q": 0,
+          "buy": 72,
+          "sell": 50
+        },
+        {
+          "id": "O2",
+          "q": 0,
+          "buy": 60,
+          "sell": 42
+        }
+      ],
+      "bonus": [
+        {
+          "id": "KCl",
+          "plain": 170,
+          "forReaction": 85
+        },
+        {
+          "id": "O2",
+          "plain": 60,
+          "forReaction": 30
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R001",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "KCl": 4,
+          "O2": 6
+        },
+        "exp": 80,
+        "ups": 1,
+        "eqBonus": 58,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 288,
+        "levelAfter": 2,
+        "expAfter": 50,
+        "bagDelta": {
+          "KCl|0": 4,
+          "MnO2|0": 1,
+          "O2|0": 6
+        },
+        "discoveredNew": [
+          "KCl",
+          "O2"
+        ]
+      }
+    }
+  },
+  {
+    "id": "bag-cap-overflow",
+    "why": "产物撞背包上限：NaCl/H₂O 都已满 50 份，本次各产 1 份却被裁掉——produced 仍报 1（玩家看见反应发生了），bagDelta 必须是空。钉住 cap = 50 + storage×step 那个基数与 lab_upgrades.storage.step，超出的部分直接消失而不是写成负数。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "HCl": 1,
+        "NaOH": 1,
+        "NaCl": 1,
+        "H2O": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "HCl|0": 5,
+        "NaOH|0": 5,
+        "NaCl|0": 50,
+        "H2O|0": 50
+      },
+      "discovered": {
+        "HCl": {
+          "times": 1,
+          "first": 0
+        },
+        "NaOH": {
+          "times": 1,
+          "first": 0
+        },
+        "NaCl": {
+          "times": 1,
+          "first": 0
+        },
+        "H2O": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {
+        "R060": true
+      },
+      "firstBonusTaken": {
+        "NaCl": true,
+        "H2O": true
+      }
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "HCl": 1,
+        "NaOH": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R060"
+      ],
+      "pickId": "R060",
+      "eq": "HCl + NaOH = NaCl + H₂O",
+      "fx": [
+        "colorchange"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 220,
+        "worth": 100
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "NaCl",
+          "q": 0,
+          "buy": 48,
+          "sell": 22
+        }
+      ],
+      "bonus": [
+        {
+          "id": "NaCl",
+          "plain": 70,
+          "forReaction": 35
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R060",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "H2O": 1,
+          "NaCl": 1
+        },
+        "exp": 20,
+        "ups": 0,
+        "eqBonus": 0,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 0,
+        "levelAfter": 8,
+        "expAfter": 20,
+        "bagDelta": {},
+        "discoveredNew": []
+      }
+    }
+  },
+  {
+    "id": "element-product-displacement",
+    "why": "产物是纯单质（Cu 只在元素表里，level 0）：发现奖金必须走\"单质定额 50、反应奖金折半 25\"那一档。这是 H1 对表时补进 discoverBonus 的第四个分叉——以前 Java 的 onDiscover 发定额、eqBonus 那条路却按 level 1 的区间发，同一种物质两个入口值不同的金币。",
+    "contentVersion": 1,
+    "seed": {
+      "coins": 5000,
+      "level": 8,
+      "exp": 0,
+      "rep": 0,
+      "realMode": true,
+      "room": "inorganic",
+      "marketDate": "2026-01-01",
+      "drift": {
+        "Fe": 1,
+        "CuSO4": 1,
+        "Cu": 1,
+        "FeSO4": 1
+      },
+      "lab": {
+        "storage": 0,
+        "safety": 0,
+        "bench": 0
+      },
+      "equipment": {},
+      "vessels": {
+        "beaker": {
+          "owned": true,
+          "tier": 0
+        }
+      },
+      "bag": {
+        "Fe|0": 2,
+        "CuSO4|0": 2
+      },
+      "discovered": {
+        "Fe": {
+          "times": 1,
+          "first": 0
+        },
+        "CuSO4": {
+          "times": 1,
+          "first": 0
+        }
+      },
+      "reactionsKnown": {},
+      "firstBonusTaken": {}
+    },
+    "bench": {
+      "vessel": "beaker",
+      "placed": {
+        "Fe": 1,
+        "CuSO4": 1
+      },
+      "temp": "room",
+      "electrolysis": false
+    },
+    "mode": {
+      "multiplier": 1,
+      "sandbox": false,
+      "insured": false
+    },
+    "rng": 0.42,
+    "probe": {
+      "prices": [
+        {
+          "id": "Cu",
+          "q": 0
+        },
+        {
+          "id": "FeSO4",
+          "q": 0
+        }
+      ],
+      "bonus": [
+        {
+          "id": "Cu"
+        },
+        {
+          "id": "FeSO4"
+        }
+      ]
+    },
+    "expect": {
+      "matchIds": [
+        "R089"
+      ],
+      "pickId": "R089",
+      "eq": "Fe + CuSO₄ = FeSO₄ + Cu",
+      "fx": [
+        "colorchange",
+        "precip"
+      ],
+      "danger": false,
+      "dangerId": null,
+      "batchCap": 10,
+      "maxMultiplier": 1,
+      "cost": {
+        "cost": 235,
+        "worth": 220
+      },
+      "repTier": {
+        "zh": "生面孔",
+        "buyRate": 1.2,
+        "speed": 1
+      },
+      "prices": [
+        {
+          "id": "Cu",
+          "q": 0,
+          "buy": 24,
+          "sell": 17
+        },
+        {
+          "id": "FeSO4",
+          "q": 0,
+          "buy": 240,
+          "sell": 168
+        }
+      ],
+      "bonus": [
+        {
+          "id": "Cu",
+          "plain": 50,
+          "forReaction": 25
+        },
+        {
+          "id": "FeSO4",
+          "plain": 380,
+          "forReaction": 190
+        }
+      ],
+      "react": {
+        "kind": "success",
+        "reactionId": "R089",
+        "procId": null,
+        "suggestId": null,
+        "produced": {
+          "Cu": 1,
+          "FeSO4": 1
+        },
+        "exp": 25,
+        "ups": 0,
+        "eqBonus": 108,
+        "yieldWarn": false,
+        "lossVal": 0,
+        "coinsDelta": 538,
+        "levelAfter": 8,
+        "expAfter": 25,
+        "bagDelta": {
+          "Cu|0": 1,
+          "FeSO4|0": 1
+        },
+        "discoveredNew": [
+          "Cu",
+          "FeSO4"
+        ]
+      }
+    }
+  }
+]
