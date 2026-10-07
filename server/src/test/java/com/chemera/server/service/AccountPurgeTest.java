@@ -8,7 +8,10 @@ import com.chemera.server.mapper.SessionMapper;
 import com.chemera.server.mapper.UserMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -109,5 +112,78 @@ class AccountPurgeTest {
                 () -> purge(users, sessions, saves, analytics, tickets, mod).purge(7L));
         verify(users, never()).delete(7L);
         verify(mod, never()).deleteReportsBy(7L);
+    }
+
+    /* ---------------- 4. 库删干净之后，进程内的现场也要跟着走（G6 + G7） ---------------- */
+
+    /**
+     * 删号不只删库：{@code GameService} 的挑战临时台/沙盒与 {@code CurfewGuard} 的 minor 判定
+     * 都是按 uid 躺在内存里的格子，人走了它们还在。
+     *
+     * <p>断言的是<b>顺序</b>而不是"调过没调过"：清理必须排在所有 SQL 之后。反过来（先清内存再删库），
+     * 一旦事务回滚就留下"号还在、现场没了"的怪相——玩家的临时台凭空重开，而账号看起来完全正常。
+     */
+    @Test
+    void theMemorySideIsEvictedAfterTheDatabaseIsSwept() {
+        UserMapper users = mock(UserMapper.class);
+        SessionMapper sessions = mock(SessionMapper.class);
+        SaveMapper saves = mock(SaveMapper.class);
+        AnalyticsMapper analytics = mock(AnalyticsMapper.class);
+        AdTicketMapper tickets = mock(AdTicketMapper.class);
+        ModerationMapper mod = mock(ModerationMapper.class);
+        List<String> order = new ArrayList<>();
+        when(users.delete(7L)).thenAnswer(i -> { order.add("user"); return 1; });
+        // 现场清理方：记下"库里的最后一行都删完之后才轮到它"
+        AccountMemoryEvictor memory = uid -> order.add("evict:" + uid);
+
+        new AccountPurge(users, sessions, saves, analytics, tickets, mod, List.of(memory)).purge(7L);
+
+        assertEquals(List.of("user", "evict:7"), order,
+                "内存现场要在删库成功之后清，一次、只清这一位");
+    }
+
+    /**
+     * 清理方抛错不许把删号事务带崩：库已经删干净了，内存那一格交给它自己的闲置清扫收尾（G7）。
+     *
+     * <p>这一条决定的是回滚方向：如果让内存清理的异常往上冒，{@code @Transactional} 会把整笔删除回滚，
+     * 玩家注销一次却"删不掉"，而且越试越删不掉——比留下一格没人读的现场糟得多。
+     */
+    @Test
+    void aThrowingEvictorNeitherFailsThePurgeNorBlocksTheOthers() {
+        UserMapper users = mock(UserMapper.class);
+        SessionMapper sessions = mock(SessionMapper.class);
+        SaveMapper saves = mock(SaveMapper.class);
+        AnalyticsMapper analytics = mock(AnalyticsMapper.class);
+        AdTicketMapper tickets = mock(AdTicketMapper.class);
+        ModerationMapper mod = mock(ModerationMapper.class);
+        AtomicLong reached = new AtomicLong(-1L);
+        when(users.delete(7L)).thenReturn(1);
+        AccountMemoryEvictor boom = uid -> {
+            throw new IllegalStateException("内存那边抛了");
+        };
+        AccountMemoryEvictor ok = uid -> reached.set(uid);
+
+        Map<String, Object> done = assertDoesNotThrow(() -> new AccountPurge(
+                users, sessions, saves, analytics, tickets, mod, List.of(boom, ok)).purge(7L));
+
+        assertEquals(7L, reached.get(), "一个清理方失败不连累其余的：该清的还得清");
+        assertEquals(1, done.get("user"), "删号结果照常回报，不受内存那一侧影响");
+    }
+
+    /** 没装配清理方（老单测与 {@code AuthService} 的测试口径）照样跑得通：这一步是尽力而为，不是必要环节。 */
+    @Test
+    void purgeWorksWithoutAnyMemoryEvictor() {
+        UserMapper users = mock(UserMapper.class);
+        SessionMapper sessions = mock(SessionMapper.class);
+        SaveMapper saves = mock(SaveMapper.class);
+        AnalyticsMapper analytics = mock(AnalyticsMapper.class);
+        AdTicketMapper tickets = mock(AdTicketMapper.class);
+        ModerationMapper mod = mock(ModerationMapper.class);
+
+        assertDoesNotThrow(() -> new AccountPurge(
+                users, sessions, saves, analytics, tickets, mod, List.of()).purge(7L));
+        assertDoesNotThrow(() -> purge(users, sessions, saves, analytics, tickets, mod).purge(7L));
+        // 两条装配路各删一次同一个 uid：空列表那种（Spring 没收到任何清理方）与老六参构造
+        verify(users, times(2)).delete(7L);
     }
 }

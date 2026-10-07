@@ -45,16 +45,37 @@ public class DailyStatsJob {
         this.ticketKeepDays = Math.max(7, ticketKeepDays);
     }
 
-    /** 启动后一小时先跑一次（免得部署时间正好错过凌晨点），之后每天一次。 */
+    /**
+     * 启动后一小时先跑一次（免得部署时间正好错过凌晨点），之后每天一次。
+     *
+     * <p>四步各自独立成段（迭代 4 复查补的）：以前一条 SQL 抛错就把后面全带走，最常见的落点是
+     * "昨天的聚合抛了，于是前天没补、两张只增不减的表也再没清过"——而且日志里只看得见第一句栈。
+     * 这四件事互相没有关系，没有理由一起死：每一步单独捕获、WARN 带步骤名，剩下的照跑。
+     * 抛错也不要把整趟重跑：每一步都是幂等的（upsert 覆盖同值、purgeOld 按保留天数删），
+     * 明天凌晨这一趟还会再来一次。
+     */
     @Scheduled(initialDelay = 3600_000L, fixedDelay = 24 * 3600_000L)
     public void sweep() {
         LocalDate today = LocalDate.now();
-        roll(today.minusDays(1));
-        roll(today.minusDays(2));
-        int ev = analytics.purgeOld(eventKeepDays);
-        int tk = tickets.purgeOld(ticketKeepDays);
-        if (ev > 0 || tk > 0) log.info("老数据清理：analytics_event {} 行（保留 {} 天），ad_ticket {} 行（保留 {} 天）",
-                ev, eventKeepDays, tk, ticketKeepDays);
+        step("日报落库(昨天)", () -> roll(today.minusDays(1)));
+        step("日报落库(前天)", () -> roll(today.minusDays(2)));
+        step("埋点清理", () -> {
+            int ev = analytics.purgeOld(eventKeepDays);
+            if (ev > 0) log.info("老数据清理：analytics_event {} 行（保留 {} 天）", ev, eventKeepDays);
+        });
+        step("广告工单清理", () -> {
+            int tk = tickets.purgeOld(ticketKeepDays);
+            if (tk > 0) log.info("老数据清理：ad_ticket {} 行（保留 {} 天）", tk, ticketKeepDays);
+        });
+    }
+
+    /** 跑一步并独立捕获：一行抛错只是这一行没做成，日志点名是哪一步。 */
+    private void step(String name, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException e) {
+            log.warn("日报任务某一步失败，其余步骤照跑：step={} err={}", name, e.toString(), e);
+        }
     }
 
     /**

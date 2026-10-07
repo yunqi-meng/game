@@ -145,4 +145,60 @@ class DailyStatsJobTest {
         verify(neg).purgeOld(7);
         verify(negT).purgeOld(7);
     }
+
+    /* ---------------- 4. 四步各自独立：一行抛错不许把后面全带走 ---------------- */
+
+    /**
+     * 昨天那一步炸了，前天照落、两张表的清理照跑，而且整趟不往外抛。
+     *
+     * <p>这四步互相没有关系，没有理由一起死。修之前的形状是"一串顺序调用外面什么都不包"，
+     * 于是最现实的落点就是：{@code statRow} 的聚合 SQL 超时（埋点表长大之后这是常态），
+     * 一句话把前天补算和两次 {@code purgeOld} 全部带走，日志里只看得见第一句栈——
+     * 表继续只增不减，而看板上一片"看起来正常"的空值。
+     */
+    @Test
+    void oneFailingStepNeverTakesTheRestDown() {
+        AnalyticsMapper a = mock(AnalyticsMapper.class);
+        LocalDate today = LocalDate.now();
+        when(a.statRow(any())).thenReturn(row(1, 1, 1, 1, 1));                    // 先给个通用桩
+        when(a.statRow(today.minusDays(1))).thenThrow(new RuntimeException("聚合 SQL 超时"));
+        when(a.purgeOld(180)).thenReturn(4000);
+        AdTicketMapper t = mock(AdTicketMapper.class);
+        when(t.purgeOld(90)).thenReturn(12);
+
+        DailyStatsJob job = new DailyStatsJob(a, t, 180, 90);
+        assertDoesNotThrow(job::sweep, "定时任务不该把一次失败升级成整趟没跑，更不该往外抛给调度线程");
+
+        verify(a).upsertDaily(today.minusDays(2), 1, 1, 1, 1, 1);                 // 前天补算照做
+        verify(a).purgeOld(180);                                                   // 两张表也照清
+        verify(t).purgeOld(90);
+    }
+
+    /** 清理那一步抛错也一样：一张表删不动，不连累另一张，更不连累已经跑过的聚合。 */
+    @Test
+    void aFailingPurgeDoesNotSwallowTheOtherOne() {
+        AnalyticsMapper a = analytics(row(2, 0, 0, 0, 0));
+        when(a.purgeOld(anyInt())).thenThrow(new RuntimeException("DELETE 锁等待超时"));
+        AdTicketMapper t = mock(AdTicketMapper.class);
+
+        new DailyStatsJob(a, t, 180, 90).sweep();
+
+        verify(t).purgeOld(90);
+        verify(a, times(2)).upsertDaily(any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt());
+    }
+
+    /**
+     * 逐步捕获只属于定时任务这条路：后台【重算】按钮是人工触发的，失败必须原样报错。
+     *
+     * <p>如果顺手把 {@code roll} 也包成"吞掉异常回一个空行"，运营点了重算看见的是"没数据"，
+     * 而不是"这次重算失败了"——那正好是 G1 立项要治的那种假绿。
+     */
+    @Test
+    void aManualRollStillSurfacesItsError() {
+        AnalyticsMapper a = mock(AnalyticsMapper.class);
+        when(a.statRow(any())).thenThrow(new RuntimeException("库里断了"));
+        DailyStatsJob job = new DailyStatsJob(a, mock(AdTicketMapper.class), 180, 90);
+
+        assertThrows(RuntimeException.class, () -> job.roll(YESTERDAY));
+    }
 }

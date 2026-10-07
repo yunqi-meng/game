@@ -27,6 +27,9 @@ import java.util.Map;
  * 那是把一个"几乎不变的小表"当热路径查询打；缓存的代价是"后台刚加的词最多 60 秒后才生效"，
  * 而 {@code invalidate()} 走的是同一个进程内的直接调用，所以后台加词实际是立刻生效的——
  * TTL 只是给"多实例部署时另一台没被叫到"这条未来路径留的收敛上限（当前是单实例，见 G7）。
+ *
+ * <p>读库失败时按 <b>last-known-good</b> 判（见 {@link #table()}）：拿上一次成功加载的那本词表继续拦，
+ * 而不是悄悄换成空表把注册与昵称的防护关一整段。只有这个进程从没成功加载过时才退到"空表放行 + WARN"。
  */
 @Component
 public class SensitiveFilter {
@@ -41,8 +44,17 @@ public class SensitiveFilter {
 
     private final ModerationMapper mod;
     private final long ttlMs;
+    /** 现在生效的那一份：正常就是刚读上来的，读库失败时是 {@link #lastGood} 那一本。 */
     private volatile Map<String, Integer> words;
     private volatile long loadedAt;
+    /**
+     * last-known-good：<b>上一次成功加载</b>的词表，只在读库成功时更新。
+     *
+     * <p>为什么单独存一份而不是复用 {@code words}：{@code words} 会在失败时被换成兜底表（空表），
+     * 而兜底表不该成为下一次失败的兜底——那样第一次抖动就会把好词表永久丢掉。
+     * 库修好之前的整段时间里，注册/昵称都按这本旧词表判，这是"降级"而不是"关防护"。
+     */
+    private volatile Map<String, Integer> lastGood;
 
     public SensitiveFilter(ModerationMapper mod,
                            @Value("${chemera.words.ttl-sec:60}") long ttlSec) {
@@ -70,17 +82,27 @@ public class SensitiveFilter {
         if (v.rejected()) throw new BizException("内容包含敏感词，请修改后重试");
     }
 
-    /** 后台改词后立刻失效（同进程调用；TTL 只兜住跨实例那种情况）。 */
+    /** 后台改词后立刻失效（同进程调用；TTL 只兜住跨实例那种情况）。last-known-good 那份要留着当兜底。 */
     public void invalidate() {
         words = null;
         loadedAt = 0L;
     }
 
+    /**
+     * 取当前生效的词表，必要时重读。
+     *
+     * <p>读库失败时的三步（迭代 4 复查补的）：WARN、把生效表退到<b>上一次成功加载的那一本</b>、
+     * 并把这次的时刻记下来（于是 TTL 之内不再反复打一张坏表）。词库故障的那段时间里注册与昵称
+     * 仍然按旧词表判——这才是降级该有的样子：判断可能滞后，但不是没有判断。
+     * 只有一次都没成功加载过（新进程 + 库从第一秒就是坏的）才没有旧表可用，那时维持原行为：
+     * 空表放行 + WARN，因为拿一份从没存在过的词表去拒玩家昵称，等于凭空造一条拦不住任何事的规则。
+     */
     private Map<String, Integer> table() {
         Map<String, Integer> cur = words;
         long now = System.currentTimeMillis();
         if (cur != null && now - loadedAt < ttlMs) return cur;
         Map<String, Integer> fresh = new LinkedHashMap<>();
+        boolean loaded = true;
         try {
             for (Map<String, Object> r : mod.words()) {
                 Object w = r.get("word");
@@ -89,11 +111,16 @@ public class SensitiveFilter {
                 fresh.put(String.valueOf(w), lv instanceof Number n ? n.intValue() : 1);
             }
         } catch (Exception e) {
-            // 读词表失败不该把注册接口拖下水：沿用上一份（可能为 null，那就按"没有词表"放行）
-            log.warn("敏感词表读取失败，本轮按上一次的结果判断: {}", e.toString());
-            if (cur != null) return cur;
-            fresh = Map.of();
+            loaded = false;
+            Map<String, Integer> good = lastGood;
+            log.warn("敏感词表读取失败，本轮按{}判断: {}",
+                    good == null ? "空词表放行（这个进程还没成功加载过词表）" : "上一次成功加载的词表",
+                    e.toString());
+            // 兜底表同样按 TTL 生效：库在抖的时候，反复重读只会把请求路径拖得更久
+            fresh = good == null ? Map.of() : good;
         }
+        // 只有成功读上来的那一本才配当兜底：空表/兜底表都不能顶掉它，否则第一次抖动就把好词表永久丢了
+        if (loaded) lastGood = fresh;
         words = fresh;
         loadedAt = now;
         return fresh;
@@ -101,4 +128,7 @@ public class SensitiveFilter {
 
     /* 只有测试会读：确认缓存真的在生效（第二次判不该再查库）。 */
     int cachedSize() { return words == null ? -1 : words.size(); }
+
+    /** 只有测试会读：最后一次<b>成功加载</b>的那一本有多大；从没成功过是 -1。 */
+    int lastKnownGoodSize() { return lastGood == null ? -1 : lastGood.size(); }
 }

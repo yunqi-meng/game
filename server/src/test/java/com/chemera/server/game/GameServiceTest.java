@@ -27,8 +27,9 @@ class GameServiceTest {
      */
     private static final String AD_KEY = "game-svc-test-key";
 
+    /** 同一份内容快照（读一次缓存起来）：本包其它回归也用它，免得每个类各读一遍 content-bundle.json。 */
     @SuppressWarnings("unchecked")
-    private static ContentRegistry.Snapshot snap() throws Exception {
+    static ContentRegistry.Snapshot snap() throws Exception {
         if (SNAP != null) return SNAP;
         Map<String, Object> bundle;
         try (InputStream in = GameServiceTest.class.getResourceAsStream("/content-bundle.json")) {
@@ -580,6 +581,32 @@ class GameServiceTest {
         assertEquals(true, b.get("stale"), "重复交付不能因为缓存了 stale 就永远回`请重试`");
         assertTrue(hookRuns[0] > afterFirst,
                 "第二次必须真的重新结算过（第一次读帧 " + afterFirst + " 次，现在 " + hookRuns[0] + " 次）");
+    }
+
+    /**
+     * G7 尾巴之外顺手钉住的一条帧自洽性：买房间那一笔意图里 {@code rooms} 才 +1，而
+     * {@code ensureBenches} 以前只在<b>进帧</b>时跑，于是下发的那一帧带着 rooms=2、benchStates=1
+     * 出门——客户端要多点一次意图（或切一次台）才看见第二张台。这里把"出门即自洽"钉死，
+     * 并且连<b>落库</b>的那一帧一起验：不能只是回执里好看、下次刷新又缩回去。
+     */
+    @Test
+    void theFrameThatBuysARoomAlreadyCarriesTheNewBench() throws Exception {
+        GameService svc = svc();
+        Map<String, Object> fresh = svc.state(1L);       // 建号
+        int rooms0 = state(fresh).rooms.size();
+        assertEquals(rooms0, state(fresh).benchStates.size(), "前置条件：买之前台数就跟着房间数");
+
+        store.g.level = 16;                              // 房间有等级线（analysis Lv.12 / 6 万金币），
+        store.g.coins = 200000L;                         // 用真实门槛当前置，不去伪造余额或绕开关
+        Map<String, Object> out = svc.act(1L, "upgrade.room", Map.of("id", "analysis"));
+        assertEquals(true, res(out).get("ok"), "买得通分析化学室：" + res(out));
+
+        GameState g = state(out);
+        assertEquals(rooms0 + 1, g.rooms.size(), "rooms +1");
+        assertEquals(g.rooms.size(), g.benchStates.size(),
+                "同一帧里 benchStates 就得跟着长：客户端不该多点一次才拿到第二张台");
+        assertEquals(g.rooms.size(), store.snapshot().benchStates.size(),
+                "落库的那一帧也是撑开的，不是只在回执里自洽");
     }
 
     /** 从整帧的事件流里取出广告到账明细（type=ad 那条）。 */

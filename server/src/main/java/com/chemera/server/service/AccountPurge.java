@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -42,16 +43,59 @@ public class AccountPurge {
     private final AnalyticsMapper analytics;
     private final AdTicketMapper tickets;
     private final ModerationMapper mod;
+    /** 内存现场的清理方（G7）：库删完之后接着把这一位留在各进程内 map 里的格子抹掉。 */
+    private final AccountMemoryEvictor memory;
 
+    /**
+     * Spring 装配入口：容器把<b>所有</b> {@link AccountMemoryEvictor} bean 收成一列注进来。
+     * 六参那个构造只给单测与 {@code AuthService} 的测试装配用，所以必须显式标注首选构造。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    public AccountPurge(UserMapper users, SessionMapper sessions, SaveMapper saves,
+                        AnalyticsMapper analytics, AdTicketMapper tickets, ModerationMapper mod,
+                        List<AccountMemoryEvictor> memory) {
+        this(users, sessions, saves, analytics, tickets, mod, compose(memory));
+    }
+
+    /** 把所有实现串成一个：某一个抛了不影响其余参与（清内存这件事是尽力而为，不许把删号事务带崩）。 */
+    private static AccountMemoryEvictor compose(List<AccountMemoryEvictor> memory) {
+        List<AccountMemoryEvictor> all = memory == null ? List.of() : List.copyOf(memory);
+        if (all.isEmpty()) return AccountMemoryEvictor.NONE;
+        if (all.size() == 1) return all.get(0);
+        return uid -> {
+            for (AccountMemoryEvictor e : all) {
+                try {
+                    e.evict(uid);
+                } catch (RuntimeException ex) {
+                    org.slf4j.LoggerFactory.getLogger(AccountPurge.class)
+                            .warn("删号后清内存现场失败（库已删干净，这一步交给 TTL 收尾）uid={}: {}", uid, ex.toString());
+                }
+            }
+        };
+    }
+
+    /** 没有内存清理方时的口径（老单测、{@code AuthService} 测试装配）：只删库，进程内让 TTL 自己收尾。 */
     public AccountPurge(UserMapper users, SessionMapper sessions, SaveMapper saves,
                         AnalyticsMapper analytics, AdTicketMapper tickets, ModerationMapper mod) {
+        this(users, sessions, saves, analytics, tickets, mod, AccountMemoryEvictor.NONE);
+    }
+
+    public AccountPurge(UserMapper users, SessionMapper sessions, SaveMapper saves,
+                        AnalyticsMapper analytics, AdTicketMapper tickets, ModerationMapper mod,
+                        AccountMemoryEvictor memory) {
         this.users = users; this.sessions = sessions; this.saves = saves;
         this.analytics = analytics; this.tickets = tickets; this.mod = mod;
+        this.memory = memory == null ? AccountMemoryEvictor.NONE : memory;
     }
 
     /**
      * 逐表清理并回报"删了什么、删了几行"。这份数字要落进 {@code audit_log}：
      * 事后追责时"我确实清了他的存档"得有凭据，而不是一句口头承诺。
+     *
+     * <p>最后一步是清内存现场：库里的东西删干净之后，进程内那两个按 uid 存的 map
+     * （玩法临时台、青少年模式判定）也该跟着走，否则"注销再同名重建"会撞上旧号那一格现场。
+     * 时机选在全部 SQL 都成功之后、事务提交之前——万一事务回滚，多清一次内存是无害的
+     * （下一次请求会从库里那一帧重新装载），反过来（先清内存、库没删成）才会留下"号还在、现场没了"的怪相。
      */
     @Transactional
     public Map<String, Object> purge(long uid) {
@@ -64,6 +108,7 @@ public class AccountPurge {
         done.put("reportsFiled", mod.deleteReportsBy(uid));
         done.put("reportsAbout", mod.unreportTarget(uid));
         done.put("user", users.delete(uid));
+        memory.evict(uid);
         return done;
     }
 }

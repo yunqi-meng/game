@@ -2,7 +2,11 @@ package com.chemera.server.game;
 
 import com.chemera.server.common.BizException;
 import com.chemera.server.mapper.UserMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -10,9 +14,10 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
 
 /**
@@ -27,9 +32,12 @@ import java.util.function.LongSupplier;
  *
  * <p>minor 查询带 60 秒进程内缓存：闸门在每次玩法请求的路径上，而标记一天也改不了几次。
  * 标记变更处显式 {@link #invalidate}，最坏情况也只是 60 秒后自愈。
+ * 这份缓存<b>有上界</b>（G7：LRU 逐最久未碰的 + 定期清掉已过有效期的），长跑不会因为"来过一次就永远留一格"失控。
  */
 @Component
 public class CurfewGuard {
+
+    private static final Logger log = LoggerFactory.getLogger(CurfewGuard.class);
 
     /** 错误标签：客户端据此弹倒计时页，而不是去匹配会改词的文案。 */
     public static final String TAG = "CURFEW";
@@ -38,11 +46,32 @@ public class CurfewGuard {
     private static final LocalTime FALLBACK_TO = LocalTime.of(21, 0);
     /** 向前找下一个放行窗口最多找这么多天：放行日全被清空时不至于死循环。 */
     private static final int LOOKAHEAD_DAYS = 21;
-    private static final long CACHE_TTL_MS = 60_000L;
+    /** 缓存清扫的节奏（G7）：与 {@code RateGuard.purge} 同一趟班车，十分钟一次。 */
+    private static final long PURGE_INTERVAL_MS = 10 * 60_000L;
+    /** 清扫节奏（G7）：与 {@code RateGuard.purge} 同一趟班车，十分钟一次。 */
+    private static final long PURGE_MS = 10 * 60_000L;
+
+    /** 放行日与"这次是什么时候判的"；一条判定的有效期就是 {@link #cacheTtlMs}。 */
+    private record Slot(boolean minor, long at) {}
 
     private final java.util.function.Supplier<ContentRegistry.Snapshot> snap;
     private final UserMapper users;
-    private final Map<Long, Slot> minorCache = new ConcurrentHashMap<>();
+    /**
+     * minor 查询结果（G7）：<b>有上界的最近最少使用表</b> + 定期清扫，不再是"只进不出"的 ConcurrentHashMap。
+     *
+     * <p>上界用 LRU（超界逐出最久未碰的那位），时间用清扫（{@link #purge()}）：一趟只收掉<b>已经过期</b>的条目，
+     * 也就是 {@code isMinor} 本来就会重查一遍的那些——所以清掉它们不改变任何一位玩家的判定结果。
+     * 反过来，"还在有效期内"的条目绝不清：那正是缓存要保住的那次判定。
+     *
+     * <p>{@code accessOrder=true} 的表在 {@code get} 时也会改结构，所以它必须由 {@code minorCache} 这把锁
+     * 或 {@code synchronizedMap} 的互斥量护着；清扫遍历整表时显式上锁。
+     */
+    private final Map<Long, Slot> minorCache;
+    /** 缓存条数上界（{@code chemera.curfew.cache-max-entries}）：给到 5000 已经远超单进程的活跃玩家数。 */
+    private final int cacheMaxEntries;
+
+    /** 一条 minor 判定的有效期；做成字段而不是常量，是为了让单测能把"陈旧"逼出来。 */
+    long cacheTtlMs = 60_000L;
 
     /** 时钟注入点（毫秒）：单测要固定到某个周几的某个时刻，生产用系统时间。 */
     LongSupplier nowMs = System::currentTimeMillis;
@@ -52,16 +81,30 @@ public class CurfewGuard {
      * 所以必须显式标注首选构造——两个候选摆在那里而没有一个被指名，容器会退回找无参构造并报错。
      */
     @Autowired
-    public CurfewGuard(ContentRegistry reg, UserMapper users) {
-        this(reg::current, users);
+    public CurfewGuard(ContentRegistry reg, UserMapper users,
+                       @Value("${chemera.curfew.cache-max-entries:5000}") int cacheMaxEntries) {
+        this(reg::current, users, cacheMaxEntries);
     }
 
     /** 测试入口：内容快照由 {@code new ContentRegistry(null, om).build(…)} 直接造，不必假装连了库。 */
     CurfewGuard(java.util.function.Supplier<ContentRegistry.Snapshot> snap, UserMapper users) {
-        this.snap = snap; this.users = users;
+        this(snap, users, 5000);
     }
 
-    private record Slot(boolean minor, long at) {}
+    /**
+     * 测试入口 + 自定义上界：形状照 {@code IntentDedupe.withQuota}，把"淘汰真的发生"写成断言。
+     * 表要在 {@code cacheMaxEntries} 落定之后再建——{@code removeEldestEntry} 读的是这个字段。
+     */
+    CurfewGuard(java.util.function.Supplier<ContentRegistry.Snapshot> snap, UserMapper users, int cacheMaxEntries) {
+        this.snap = snap; this.users = users;
+        this.cacheMaxEntries = Math.max(1, cacheMaxEntries);
+        this.minorCache = Collections.synchronizedMap(new LinkedHashMap<>(64, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, Slot> eldest) {
+                return size() > CurfewGuard.this.cacheMaxEntries;
+            }
+        });
+    }
 
     /** 玩法意图的统一闸门：不放行就抛 403 + tag=CURFEW，带一句人话和下次可玩的时刻。 */
     public void assertAllowed(long uid) {
@@ -103,10 +146,44 @@ public class CurfewGuard {
     /** 运维面板（G8）读的第三个内存量：这一层是进程内缓存，多实例时各自的水位不同，看的是"有没有失控"。 */
     public int cachedSize() { return minorCache.size(); }
 
+    /**
+     * 塞一条"很久以前判过的"缓存项：只给单测用，好把"清扫到底认哪条时间判废"写成断言。
+     * 生产路径永远走 {@link #isMinor}，那里落进去的时刻就是现在。
+     */
+    void addCached(long uid, boolean minor, long judgedAtMs) {
+        minorCache.put(uid, new Slot(minor, judgedAtMs));
+    }
+
+    /**
+     * 定期清扫（G7）：只收掉<b>已经过了有效期</b>的条目。
+     *
+     * <p>为什么这样清不会改变任何人的判定：一条 {@link Slot} 的有效期就是 {@link #cacheTtlMs}，
+     * 过期之后 {@link #isMinor} 本来也要重查一遍库，删掉它只是让那次重查提前发生。
+     * 反过来，"今天刚判过、还在有效期内"的那些一条都不碰——那正是这层缓存存在的意义
+     * （闸门在每次玩法请求的路径上，标记一天也改不了几次）。
+     * 上界另有 LRU 兜着，所以这一趟管的是"没超界但一直在长"那种慢泄漏：一个账号被闸门碰过一次
+     * 就永远留一格，长跑下来表里躺着的全是再也没来的号。
+     */
+    @Scheduled(fixedDelay = PURGE_INTERVAL_MS)
+    public void purge() {
+        long wall = System.currentTimeMillis();
+        int dropped;
+        synchronized (minorCache) {                 // 遍历 synchronizedMap 的视图要自己上锁（Javadoc 明确要求）
+            int before = minorCache.size();
+            Iterator<Map.Entry<Long, Slot>> it = minorCache.entrySet().iterator();
+            while (it.hasNext()) {
+                if (it.next().getValue().at() + cacheTtlMs <= wall) it.remove();
+            }
+            dropped = before - minorCache.size();
+        }
+        if (dropped > 0) log.info("青少年模式缓存清扫：收走 {} 条过期判定，剩 {} 条（上界 {}）",
+                dropped, minorCache.size(), cacheMaxEntries);
+    }
+
     private boolean isMinor(long uid) {
         long wall = System.currentTimeMillis();
         Slot s = minorCache.get(uid);
-        if (s != null && s.at() + CACHE_TTL_MS > wall) return s.minor();
+        if (s != null && s.at() + cacheTtlMs > wall) return s.minor();
         Integer v = users.minorOf(uid);
         boolean minor = v != null && v == 1;
         minorCache.put(uid, new Slot(minor, wall));

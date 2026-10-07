@@ -4,14 +4,16 @@ import com.chemera.server.service.SaveService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.DoubleSupplier;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
@@ -22,6 +24,8 @@ import static com.chemera.server.game.EconomyService.res;
  * 权威游戏服务：所有玩法意图的唯一入口。每次调用 = 载入存档 → 每日刷新(rollDaily) → 就地结算(引擎/经济) → 写回 → 返回 {state, revision, events}。
  * 客户端只发意图、渲染回执，不再本地计算——彻底“在线化”。
  * 反应现场的临时台（挑战/沙盒）用每 uid 的内存 {@link EngineCtx} 承载（tempBench/sandbox），并尽力回填进存档以便重启复原。
+ * 这份内存表是<b>有上界的最近最少使用表</b>（G7：上限 + 闲置清扫，见 {@link #ctx(long)}），长跑不会把自己撑爆；
+ * 代价是被逐出的那一位临时台重开，存档一行不少。
  */
 @Service
 public class GameService {
@@ -48,16 +52,47 @@ public class GameService {
      * 时段判定的正确性由 {@code CurfewGuardTest} 自己钉住，两边都不必伪造整条链。
      */
     private final LongConsumer gate;
-    private final Map<Long, EngineCtx> sessions = new ConcurrentHashMap<>();
+    /**
+     * 每 uid 一份的内存现场（G7）：<b>有上界的最近最少使用表</b>，不再是"只进不出"的 ConcurrentHashMap。
+     *
+     * <p>形状照 {@link IntentDedupe}：纯 Java、容量上限 + LRU + 尽力清扫，没有缓存库、没有表、重启即空。
+     * 用 {@code accessOrder=true} 的 {@link LinkedHashMap} 而不是并发表，是为了让"取一次"本身就等于
+     * "标记为最近使用"——这一层的每次访问都在 {@code synchronized (sessions)} 里做，临界区只有几次
+     * 哈希操作，不含任何 IO。
+     */
+    private final Map<Long, Live> sessions;
+    /** 现场条数上界（{@code chemera.game.ctx-max-entries}）：做成字段而不是 final，是因为单测要把上界逼很小。 */
+    int ctxMaxEntries = 2000;
+    /** 闲置多久算冷（{@code chemera.game.ctx-idle-minutes}）：只有清扫会用它，LRU 淘汰不看时间。 */
+    long ctxIdleMs = 30 * 60_000L;
+
+    private static final long MIN_MS = 60_000L;
+
+    /**
+     * 一格现场带上的两笔账：什么时候被碰过（冷判定）+ 现在有没有人在结算它（在途判定）。
+     * 两个字段都只在 {@code synchronized (sessions)} 里读写，所以不需要原子类。
+     */
+    private static final class Live {
+        final EngineCtx ctx = new EngineCtx();
+        long lastUsed = System.currentTimeMillis();
+        int inFlight;
+    }
 
     /** 随机源：生产用强随机；测试注入定值以获得确定性结算。 */
     DoubleSupplier rng = () -> java.util.concurrent.ThreadLocalRandom.current().nextDouble();
 
-    /** Spring 装配入口：另一个包私有的 Supplier 构造只给测试注入确定性快照，故须显式标注首选构造。 */
+    /**
+     * Spring 装配入口：另一个包私有的 Supplier 构造只给测试注入确定性快照，故须显式标注首选构造。
+     *
+     * <p>两个配额（G7）走配置：上限是为了"这一层绝不把自己撑爆"，闲置时长是给"玩过就走"的那批人
+     * 兜底——LRU 只超界才逐人，而一台长跑的单机如果离上界还远，冷现场就一直躺在内存里没人收。
+     */
     @Autowired
     public GameService(ContentRegistry reg, GameEngine e, EconomyService eco, GameStore store,
-                       AdService ads, CurfewGuard curfew, IntentDedupe dedupe) {
-        this(reg::current, e, eco, store, ads, curfew::assertAllowed, dedupe);
+                       AdService ads, CurfewGuard curfew, IntentDedupe dedupe,
+                       @Value("${chemera.game.ctx-max-entries:2000}") int ctxMaxEntries,
+                       @Value("${chemera.game.ctx-idle-minutes:30}") int ctxIdleMinutes) {
+        this(reg::current, e, eco, store, ads, curfew::assertAllowed, dedupe, ctxMaxEntries, ctxIdleMinutes);
     }
 
     GameService(Supplier<ContentRegistry.Snapshot> snap, GameEngine e, EconomyService eco,
@@ -72,11 +107,124 @@ public class GameService {
 
     GameService(Supplier<ContentRegistry.Snapshot> snap, GameEngine e, EconomyService eco,
                 GameStore store, AdService ads, LongConsumer gate, IntentDedupe dedupe) {
-        this.snap = snap; this.engine = e; this.eco = eco; this.store = store; this.ads = ads;
-        this.gate = gate; this.dedupe = dedupe;
+        this(snap, e, eco, store, ads, gate, dedupe, 2000, 30);
     }
 
-    EngineCtx ctx(long uid) { return sessions.computeIfAbsent(uid, k -> new EngineCtx()); }
+    /**
+     * 测试用：自定义现场配额与闲置时长，好把"淘汰真的发生"写成断言（口径同 {@link IntentDedupe#withQuota}）。
+     * 闲置分钟给 0 就是"每次清扫都把不在途的现场全部收走"。
+     */
+    GameService(Supplier<ContentRegistry.Snapshot> snap, GameEngine e, EconomyService eco,
+                GameStore store, AdService ads, LongConsumer gate, IntentDedupe dedupe,
+                int ctxMaxEntries, int ctxIdleMinutes) {
+        this.snap = snap; this.engine = e; this.eco = eco; this.store = store; this.ads = ads;
+        this.gate = gate; this.dedupe = dedupe;
+        this.ctxMaxEntries = Math.max(1, ctxMaxEntries);
+        this.ctxIdleMs = Math.max(0, ctxIdleMinutes) * MIN_MS;
+        this.sessions = new LinkedHashMap<>(64, 0.75f, true);
+    }
+
+    /**
+     * 取（必要时建）这一位的现场：顺带把它标成"最近使用"，并在超界时逐掉最久未用的那一个。
+     *
+     * <p><b>写在这里的权衡</b>：淘汰只发生在超界与清扫两个时机，两处都不碰"本次 {@code act()} 正在用"
+     * 的现场（{@link Live#inFlight}），也不碰刚进来的那一格自己——所以在途的那一路永远不会被自己的请求
+     * 把现场抽走。代价是上界是<b>软</b>的：全表挤满热请求时最多被在途请求顶出去若干格，
+     * 而这个数目有天然上限（容器线程数，默认 200），远小于 2000 的配额。
+     * 之所以接受软上界，是权衡另一头：{@code EngineCtx} 丢现场的后果只是沙盒/挑战临时台重开
+     * （存档里的东西一行不少，见 {@link #syncLiveScene}），不是丢钱，所以这一层的纪律是"先保在途、再守上界"。
+     */
+    EngineCtx ctx(long uid) {
+        synchronized (sessions) {
+            Live l = sessions.get(uid);            // accessOrder=true：这一次 get 就把它挪到最近使用端
+            if (l == null) {
+                l = new Live();
+                sessions.put(uid, l);
+            }
+            l.lastUsed = System.currentTimeMillis();
+            trimLocked(uid);
+            return l.ctx;
+        }
+    }
+
+    /**
+     * 超界就按最近最少使用逐出；跳过的两格是"正在被用"的和"这一次刚进来的自己"（见 {@link #ctx(long)} 的权衡）。
+     * 调用方须已持有 sessions 锁。
+     */
+    private void trimLocked(long self) {
+        if (sessions.size() <= ctxMaxEntries) return;
+        Iterator<Map.Entry<Long, Live>> it = sessions.entrySet().iterator();
+        while (it.hasNext() && sessions.size() > ctxMaxEntries) {
+            Map.Entry<Long, Live> e = it.next();
+            if (e.getKey() == self || e.getValue().inFlight > 0) continue;
+            it.remove();
+        }
+    }
+
+    /** 请求开始：标在途并顺带把现场建出来，好让清扫/淘汰看得见"这一位正在被用"。 */
+    private void enter(long uid) {
+        synchronized (sessions) {
+            Live l = sessions.get(uid);
+            if (l == null) {
+                l = new Live();
+                sessions.put(uid, l);
+            }
+            l.inFlight++;
+            l.lastUsed = System.currentTimeMillis();
+            trimLocked(uid);
+        }
+    }
+
+    /** 请求结束（含抛异常）：解除在途标记，同时把"最近使用"推到这一刻——他刚玩过，不该先被扫掉。 */
+    private void exit(long uid) {
+        synchronized (sessions) {
+            Live l = sessions.get(uid);
+            if (l == null) return;                 // evict() 已经把他整格收走了，这里没账要还
+            if (l.inFlight > 0) l.inFlight--;
+            l.lastUsed = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * 丢掉这一位的内存现场（删号 G6 走的就是它）。
+     *
+     * <p>不判在途：删号这件事本身就要比他手上那一笔意图更权威——清掉之后他下一次请求拿到的是一份
+     * 全新现场，而存档已经不在库里了，结算不出任何属于旧账号的东西。
+     */
+    public void evict(long uid) {
+        synchronized (sessions) {
+            sessions.remove(uid);
+        }
+    }
+
+    /** 运维面板与单测读的内存量（G7/G8）：这一层是进程内现场，重启即空，看的是"有没有失控"。 */
+    public int ctxCount() {
+        synchronized (sessions) {
+            return sessions.size();
+        }
+    }
+
+    /**
+     * 闲置现场清扫（G7）：节奏照 {@code RateGuard.purge}——十分钟一趟，只收"冷到没人碰"且不在途的。
+     * 超界逐人由 {@link #ctx(long)} 自己管，这里管的是"没超界但一直在长大"那种慢泄漏。
+     */
+    @Scheduled(fixedDelay = 10 * MIN_MS)
+    public void sweepSessions() {
+        long now = System.currentTimeMillis();
+        int dropped;
+        synchronized (sessions) {
+            int before = sessions.size();
+            Iterator<Map.Entry<Long, Live>> it = sessions.entrySet().iterator();
+            while (it.hasNext()) {
+                Map.Entry<Long, Live> e = it.next();
+                Live l = e.getValue();
+                if (l.inFlight > 0) continue;
+                if (now - l.lastUsed >= ctxIdleMs) it.remove();
+            }
+            dropped = before - sessions.size();
+        }
+        if (dropped > 0) log.info("内存现场清扫：收走 {} 位冷现场，剩 {} 位（上界 {}）", dropped, ctxCount(), ctxMaxEntries);
+    }
 
     /* ================= 读：整帧快照（含每日刷新落库） ================= */
     public Map<String, Object> state(long uid) { return act(uid, "state", Map.of()); }
@@ -137,16 +285,22 @@ public class GameService {
     private Map<String, Object> run(long uid, String intent, Map<String, Object> p) {
         gate.accept(uid);                      // 青少年模式：时段外的意图一律回绝，含只读的 state 取帧
         p = p == null ? Map.of() : p;
-        Outcome o = actOnce(uid, intent, p);
-        for (int attempt = 1; o.out == null; attempt++) {
-            requeue(o.claimed);                // 本轮到账的广告先退回 rewarded，重放时才能重新到账
-            if (attempt > CAS_RETRIES) {
-                log.warn("意图写回连续 {} 次撞号 uid={} intent={}", attempt - 1, uid, intent);
-                return staleFrame(uid, intent);
+        // 从这一刻起这一位的现场算"在途"：清扫与超界逐人都绕开它（G7 的纪律，见 ctx 的注释）
+        enter(uid);
+        try {
+            Outcome o = actOnce(uid, intent, p);
+            for (int attempt = 1; o.out == null; attempt++) {
+                requeue(o.claimed);                // 本轮到账的广告先退回 rewarded，重放时才能重新到账
+                if (attempt > CAS_RETRIES) {
+                    log.warn("意图写回连续 {} 次撞号 uid={} intent={}", attempt - 1, uid, intent);
+                    return staleFrame(uid, intent);
+                }
+                o = actOnce(uid, intent, p);
             }
-            o = actOnce(uid, intent, p);
+            return o.out;
+        } finally {
+            exit(uid);
         }
-        return o.out;
     }
 
     /** 把本轮抢到的广告结算权退回待结算：写盘没成功，奖励就不该算发过。 */
@@ -195,6 +349,10 @@ public class GameService {
 
         syncLiveScene(g, c);                   // 挑战临时台回填进 g.chal.bench，供持久化/重启复原
         g.insured = c.insured;                 // 事故消耗保险 → 回写存档
+        // 开房间是"这一笔意图里 rooms 才 +1"，而 ensureBenches 只在<b>进帧</b>时跑过，
+        // 于是下发的那一帧会带着 rooms=2、benchStates=1 出门——客户端要多点一下才对齐。
+        // 收尾再撑一次：出去的帧必须自洽（只补空台、不动已有台面，也不碰挑战用的 tempBench）。
+        engine.ensureBenches(g);
 
         // 只读意图且这一帧没被刷新/结算改动过、存档行也已经存在 ⇒ 一个字都不必写
         boolean mustWrite = !READ_ONLY.contains(intent) || !daily.isEmpty() || !adGrants.isEmpty() || base == 0;

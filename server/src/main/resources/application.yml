@@ -40,6 +40,13 @@ chemera:
     # 同时留多少个玩家（进程内 LRU，重启清零）。上限是为了"这一层绝不把自己撑爆"：
     # 挤出去的人只是失去幂等保护、退回 F2 之前的行为，不是丢数据。
     dedupe-sessions: ${CHEMERA_INTENT_DEDUPE_SESSIONS:400}
+  game:
+    # 每 uid 的内存现场（挑战临时台 / 沙盒 / 一次性题号）上界（G7）：进程内 LRU，重启清零。
+    # 上限是为了"单实例长跑不被自己撑爆"；被逐出的人只是临时台重开，存档里的东西一行不少，
+    # 所以宁可逐出，也不允许这一层没有上界（口径与 chemera.intent.dedupe-sessions 一致）。
+    ctx-max-entries: ${CHEMERA_GAME_CTX_MAX_ENTRIES:2000}
+    # 闲置多久算冷：离上界还远时，十分钟一趟的清扫会把冷到这个时长的现场收走（在途的不碰）。
+    ctx-idle-minutes: ${CHEMERA_GAME_CTX_IDLE_MINUTES:30}
   save:
     max-bytes: 2097152
     # 存档历史抽样：每多少个 revision 往 user_save_revision 记一条全量快照（0/负数按 1 处理＝每条都记）。
@@ -98,6 +105,10 @@ chemera:
     dev-mode: ${CHEMERA_AD_DEV_MODE:false}
     # TapADN 推广位 ID（激励视频）：留空时客户端用演示位，正式接入由后台/环境变量下发
     space-id: ${CHEMERA_AD_SPACE_ID:}
+  curfew:
+    # 青少年模式闸门查 minor 的进程内缓存条数上界（G7）：超界按最久未碰逐出，十分钟一趟还会清掉
+    # 过了 60 秒有效期的那些。被逐出的后果只是"下一次玩法请求多查一遍 app_user.minor"，判定结果不变。
+    cache-max-entries: ${CHEMERA_CURFEW_CACHE_MAX_ENTRIES:5000}
   taptap:
     # TapTap 登录票据的服务端验签（/api/auth/taptap）。client_id 走环境变量，绝不写进仓库。
     client-id: ${CHEMERA_TAPTAP_CLIENT_ID:}

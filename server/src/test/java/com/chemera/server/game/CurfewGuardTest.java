@@ -16,6 +16,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,6 +72,22 @@ class CurfewGuardTest {
 
     private static CurfewGuard guard(String curfewJson, long epochMillis, boolean minor) throws Exception {
         return guard(snapWith(curfewJson), epochMillis, users(minor));
+    }
+
+    /**
+     * 专给缓存那几条用例：闸门时钟照旧钉在周一 03:00（未成年人一律拦），
+     * 而缓存自己的有效期读的是<b>真实墙钟</b>（与生产一致），所以摆缓存用的是
+     * {@link CurfewGuard#addCached} 那个注入口，不是把 {@code nowMs} 调过去。
+     */
+    private static CurfewGuard cacheGuard(UserMapper m) throws Exception {
+        return cacheGuard(m, 5000);
+    }
+
+    private static CurfewGuard cacheGuard(UserMapper m, int cacheMaxEntries) throws Exception {
+        ContentRegistry.Snapshot s = snapWith(WEEKEND);
+        CurfewGuard g = new CurfewGuard(() -> s, m, cacheMaxEntries);
+        g.nowMs = () -> ms(MON, 3, 0);
+        return g;
     }
 
     private static long ms(LocalDate d, int h, int mi) {
@@ -215,6 +232,53 @@ class CurfewGuardTest {
         g.invalidate(9L);
         assertThrows(BizException.class, () -> g.assertAllowed(9L));
         verify(m, times(2)).minorOf(9L);          // 运营刚标记完，玩家不该再等 60 秒缓存过期
+    }
+
+    /**
+     * 缓存有条上界（G7）：以前一个号被闸门碰过一次就在表里永远留一格，长跑只会长不会消。
+     * 上界按最久未碰逐出，被逐出的代价只是"下一次玩法请求多查一遍 {@code app_user.minor}"。
+     */
+    @Test
+    void minorCacheHasABound() throws Exception {
+        CurfewGuard g = cacheGuard(users(true), 3);
+        for (long uid = 1; uid <= 50; uid++) g.view(uid);       // view 也走 isMinor，且不抛，正好用来灌表
+        assertEquals(3, g.cachedSize(), "灌五十位只留三格：这张表不许没有上界");
+    }
+
+    /**
+     * 定期清扫只收<b>已经过了有效期</b>的条目，一个"还在有效期内"的都不碰。
+     *
+     * <p>这两半合起来才是这条防线的全部：只断言"陈旧的被清掉"，可能清的是刚判过的那些——
+     * 那等于把缓存拆了，每次玩法请求都回库查 minor；只断言"新的留着"，又清不出任何东西。
+     * 而且过期条目本来在 {@code isMinor} 里就要重查一遍库，删掉它不改变任何人的判定结果。
+     */
+    @Test
+    void purgeSweepsStaleJudgementsAndKeepsTheLiveOne() throws Exception {
+        UserMapper m = users(true);
+        CurfewGuard g = cacheGuard(m);                          // 时钟钉在周一 03:00：未成年人一律拦
+        long wall = System.currentTimeMillis();
+        g.addCached(1L, true, wall);                            // 刚判过：还在 60 秒有效期内
+        g.addCached(2L, true, wall - 61_000L);                  // 一分钟以前判的：早就该重查了
+
+        g.purge();
+        assertEquals(1, g.cachedSize(), "清掉的只有过期那一条");
+        verify(m, never()).minorOf(anyLong());                  // 清扫自己一次库都不该打
+
+        assertThrows(BizException.class, () -> g.assertAllowed(1L));
+        verify(m, never()).minorOf(1L);                         // 有效期内的那条还是按缓存判，没被清扫打成一次回库
+        assertThrows(BizException.class, () -> g.assertAllowed(2L));
+        verify(m, times(1)).minorOf(2L);                        // 被清掉的那条回来时重查一遍库，判定结果不变
+    }
+
+    /** 清空之后不留残渣：全表都是过期条目时一趟扫完就该归零。 */
+    @Test
+    void purgeEmptiesAWholeTableOfStaleEntries() throws Exception {
+        CurfewGuard g = cacheGuard(users(true));
+        long wall = System.currentTimeMillis();
+        for (long uid = 1; uid <= 20; uid++) g.addCached(uid, true, wall - 61_000L);
+        assertEquals(20, g.cachedSize());
+        g.purge();
+        assertEquals(0, g.cachedSize(), "长跑之后这张表不该靠着上界才收敛，时间本身就够把它清干净");
     }
 
     /* ---------------- 展示视图：不抛异常，且必须把服务器时钟一起给出去 ---------------- */

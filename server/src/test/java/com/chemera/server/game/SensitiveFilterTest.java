@@ -1,5 +1,7 @@
 package com.chemera.server.game;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.chemera.server.common.BizException;
 import com.chemera.server.mapper.ModerationMapper;
 import org.junit.jupiter.api.Test;
@@ -138,11 +140,113 @@ class SensitiveFilterTest {
         verify(m, times(2)).words();
     }
 
+    /* ---------------- 词库故障期的三种形态（last-known-good） ---------------- */
+
+    /**
+     * 形态一：<b>成功加载过</b>的词表真的用得上——包括故障期那一判。
+     *
+     * <p>以前失败时是按"当前那份"兜底，而当前那份可能已经被上一次的降级换成了空表；
+     * 于是第一次抖动把好词表永久丢掉，之后整段故障期注册与昵称<b>全无防护</b>。
+     * 现在兜底是单独一本只在成功时才更新的账。
+     */
+    @Test
+    void anOutageMidStreamIsJudgedByTheLastGoodTable() {
+        ModerationMapper m = mock(ModerationMapper.class);
+        when(m.words()).thenReturn(List.of(row("脏话", 2), row("代练", 1)))
+                .thenThrow(new RuntimeException("库断了"));
+        SensitiveFilter f = new SensitiveFilter(m, 0);         // TTL 给 0 ⇒ 每一判都重读，失败正好落在第二句上
+
+        assertTrue(f.scan("第一句有脏话").rejected(), "成功加载的那一判要用得上词表");
+        assertEquals(2, f.lastKnownGoodSize(), "读成功的那一本才是 last-known-good");
+
+        List<ILoggingEvent> events = whileCapturingLogs(() -> {
+            SensitiveFilter.Verdict v = f.scan("第二句有脏话，还卖代练");
+            assertEquals("脏话", v.blocked(), "故障期照样按上一本词表拦：降级是'判断变旧'，不是'关掉判断'");
+            assertEquals(List.of("代练"), v.flagged(), "提示档的那本旧词表也还在工作");
+        });
+        assertTrue(hasWarn(events, "上一次成功加载的词表"),
+                "降级要写明是按哪一本判的，否则日志里看不出防护已经变松");
+    }
+
+    /** 形态二：这个进程<b>从没</b>成功加载过词表（新进程 + 库从第一秒就是坏的）——维持原行为：空表放行，但必须 WARN。 */
+    @Test
+    void aProcessThatNeverLoadedATableLetsTextThroughButSaysSo() {
+        ModerationMapper m = mock(ModerationMapper.class);
+        when(m.words()).thenThrow(new RuntimeException("库从第一秒就是坏的"));
+        SensitiveFilter f = new SensitiveFilter(m, 60);
+
+        List<ILoggingEvent> events = whileCapturingLogs(() -> {
+            assertFalse(f.scan("随便什么，包括脏话").rejected(), "从没读上来过词表时按空表放行：拿一份没存在的词表去拒昵称是凭空造规则");
+            assertDoesNotThrow(() -> f.block("随便什么"));
+        });
+        assertEquals(-1, f.lastKnownGoodSize(), "一次都没成功过就没有旧表可用，兜底表自己不算旧表");
+        assertTrue(hasWarn(events, "敏感词表读取失败"), "放行这件事必须留在日志里");
+    }
+
+    /** 形态三：坏 → 好 → 再坏。第二次坏要退回<b>那本成功的</b>，而不是第一次坏留下的那份空表。 */
+    @Test
+    void anEmptyFallbackNeverBecomesTheLastKnownGood() {
+        ModerationMapper m = mock(ModerationMapper.class);
+        when(m.words()).thenThrow(new RuntimeException("开局就坏"))
+                .thenReturn(List.of(row("脏话", 2)))
+                .thenThrow(new RuntimeException("又坏了"));
+        SensitiveFilter f = new SensitiveFilter(m, 0);
+
+        assertFalse(f.scan("第一句").rejected(), "从没成功过：空表放行");
+        assertTrue(f.scan("第二句有脏话").rejected(), "读成功之后就用得上词表");
+        assertTrue(f.scan("第三句还有脏话").rejected(),
+                "再坏要退回那本真正读上来的词表，而不是把兜底用的空表当成新的兜底");
+    }
+
+    /** 失败之后 TTL 之内不再反复打那张坏表：兜底表同样有一份有效期，这是"别把请求路径拖死"的那一半。 */
+    @Test
+    void aFailedReloadStopsHammeringTheBrokenTable() {
+        ModerationMapper m = mock(ModerationMapper.class);
+        when(m.words()).thenReturn(List.of(row("脏话", 2)))
+                .thenThrow(new RuntimeException("库断了"));
+        SensitiveFilter f = new SensitiveFilter(m, 60);
+
+        assertTrue(f.scan("第一句有脏话").rejected());              // 第 1 次查库：成功
+        f.invalidate();                                            // 后台改了词，强制下一判重读
+        assertTrue(f.scan("第二句有脏话").rejected());              // 第 2 次查库：失败 ⇒ 退回旧表
+        assertTrue(f.scan("第三句还有脏话").rejected());            // 兜底表也在 TTL 之内 ⇒ 不再打库
+        verify(m, times(2)).words();
+    }
+
     /** 词表为空时任何文本都放行：这是"运营删光了词"的正常结果，不是 bug。 */
     @Test
     void anEmptyTableLetsEverythingThrough() {
         SensitiveFilter f = new SensitiveFilter(table(List.of()), 60);
         assertFalse(f.scan("任意文本，包括脏话").rejected());
         assertDoesNotThrow(() -> f.block("任意文本"));
+    }
+
+    /* ---------------- 日志捕获：降级这件事不能只写在注释里 ---------------- */
+
+    /**
+     * 跑动作期间收下同类的日志。级别显式压到 DEBUG 再复原：本类的 logger 由 {@code application.yml}
+     * 管着，而单测没有 Spring 环境，靠默认配置读到什么级别是另一回事——这里要的是"这一趟看得见 WARN"。
+     */
+    private static List<ILoggingEvent> whileCapturingLogs(Runnable action) {
+        ch.qos.logback.classic.Logger lg =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(SensitiveFilter.class);
+        ch.qos.logback.classic.Level before = lg.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        lg.setLevel(ch.qos.logback.classic.Level.DEBUG);
+        appender.start();
+        lg.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            lg.detachAppender(appender);
+            appender.stop();
+            lg.setLevel(before);
+        }
+        return appender.list;
+    }
+
+    private static boolean hasWarn(List<ILoggingEvent> events, String contains) {
+        return events.stream().anyMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN
+                && e.getFormattedMessage().contains(contains));
     }
 }
