@@ -17,6 +17,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Map;
 
+import java.time.LocalDateTime;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -53,7 +55,7 @@ class ReportHttpTest {
                 300, 1, 1, 60, 200, 30, 5, 30, false);
         jwt = new JwtService("report-http-layer-secret-value-32b!", 60);
         SessionMapper sessions = mock(SessionMapper.class);
-        when(sessions.liveCount(anyLong(), anyLong())).thenReturn(1);
+        when(sessions.liveCount(anyLong(), anyLong(), any(LocalDateTime.class))).thenReturn(1);
         mvc = MockMvcBuilders.standaloneSetup(new ReportController(reports, guard))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .addInterceptors(new AuthInterceptor(jwt, new SessionGuard(sessions, jwt)))

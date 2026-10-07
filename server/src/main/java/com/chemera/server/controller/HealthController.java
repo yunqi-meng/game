@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.lang.management.ManagementFactory;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -46,7 +47,7 @@ public class HealthController {
         try {
             system.ping();
             out.put("contentVersion", content.version());
-            out.put("activeSessions", sessions.countActive());
+            out.put("activeSessions", sessions.countActive(LocalDateTime.now()));
         } catch (Exception e) {
             db = false;
             out.put("dbError", e.getClass().getSimpleName());

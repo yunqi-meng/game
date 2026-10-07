@@ -60,7 +60,7 @@ public class AdminUserController {
                                  HttpServletRequest req) {
         String by = support.requireWriter(req);
         users.setBan(id, 1, LocalDateTime.now().plusDays(days));
-        sessions.revokeAll(id);
+        sessions.revokeAll(id, LocalDateTime.now());
         audit.log(by, "user.ban", "uid:" + id, Map.of("days", days), req);
         return ApiResponse.ok();
     }

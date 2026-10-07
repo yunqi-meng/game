@@ -23,8 +23,17 @@ public interface AdminMapper {
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(AdminUser a);
 
-    @Update("UPDATE admin_user SET last_login_at=NOW() WHERE id=#{id}")
-    int touchLogin(long id);
+    /**
+     * 后台账号的最近登录时间同样由进程时钟写（与 {@code UserMapper.touchLogin} 一条规矩）：
+     * 这一列只在【管理员】列表里显示，但显示的是"运维看到的几点"，
+     * 库与进程不同时区时它会和后台自己审计日志的时间差 8 小时，排查问题时更误导。
+     */
+    @Update("UPDATE admin_user SET last_login_at=#{now} WHERE id=#{id}")
+    int touchLogin(@Param("id") long id, @Param("now") java.time.LocalDateTime now);
+
+    default int touchLogin(long id) {
+        return touchLogin(id, java.time.LocalDateTime.now());
+    }
 
     @Select("SELECT COUNT(*) FROM admin_user")
     long count();

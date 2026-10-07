@@ -6,8 +6,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -30,12 +34,13 @@ class SessionGuardTest {
     void missingOrNonPositiveSidIsNeverLive() {
         assertFalse(guard.live(null, 7L), "没有 sid 的令牌（本轮上线前的老形状）一律当失效");
         assertFalse(guard.live(0L, 7L));
-        assertEquals(0L, sessions.liveCount(1L, 1L), "未 stub 的 mock 返回 0：默认拒绝，不会误放");
+        assertEquals(0, sessions.liveCount(1L, 1L, LocalDateTime.now()),
+                "未 stub 的 mock 返回 0：默认拒绝，不会误放");
     }
 
     @Test
     void liveIsAnExistenceCheckOnTheRow() {
-        when(sessions.liveCount(42L, 7L)).thenReturn(1);
+        when(sessions.liveCount(eq(42L), eq(7L), any())).thenReturn(1);
         assertTrue(guard.live(42L, 7L));
     }
 
@@ -43,7 +48,7 @@ class SessionGuardTest {
     @Test
     void interceptorRejectsRevokedSessionEvenThoughSignatureIsFine() {
         String token = jwt.issue(7L, "user", "user", "小化", 42L);
-        when(sessions.liveCount(anyLong(), anyLong())).thenReturn(0);
+        when(sessions.liveCount(anyLong(), anyLong(), any())).thenReturn(0);
         AuthInterceptor it = new AuthInterceptor(jwt, guard);
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/game/state");
         req.addHeader("Authorization", "Bearer " + token);
@@ -56,7 +61,7 @@ class SessionGuardTest {
     @Test
     void interceptorAcceptsLiveSessionAndWritesUid() {
         String token = jwt.issue(7L, "user", "user", "小化", 42L);
-        when(sessions.liveCount(42L, 7L)).thenReturn(1);
+        when(sessions.liveCount(eq(42L), eq(7L), any())).thenReturn(1);
         AuthInterceptor it = new AuthInterceptor(jwt, guard);
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/game/state");
         req.addHeader("Authorization", "Bearer " + token);
@@ -73,8 +78,8 @@ class SessionGuardTest {
         req.addHeader("Authorization", "Bearer " + jwt.issue(7L, "user", "user", "游客x", 42L));
         assertNull(guard.optionalUid(req), "会话已撤销 → 当作没登录，不带并档权限");
 
-        when(sessions.liveCount(42L, 7L)).thenReturn(1);
-        assertEquals(7L, guard.optionalUid(req), "会话还在 → 就是这一次登录的人");
+        when(sessions.liveCount(eq(42L), eq(7L), any())).thenReturn(1);
+        assertEquals(7L, guard.optionalUid(req), "会话还活着才给并档的资格");
     }
 
     /** 后台令牌不该被当成玩家登录态（typ 不符），可选路径同样要拒。 */

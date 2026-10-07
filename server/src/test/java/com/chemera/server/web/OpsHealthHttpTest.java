@@ -27,6 +27,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import javax.sql.DataSource;
 
+import java.time.LocalDateTime;
+
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -67,7 +69,7 @@ class OpsHealthHttpTest {
         SessionMapper sessions = mock(SessionMapper.class);
         ContentMapper content = mock(ContentMapper.class);
         when(content.version()).thenReturn(41L);
-        when(sessions.countActive()).thenReturn(3L);
+        when(sessions.countActive(any(LocalDateTime.class))).thenReturn(3L);
         anonymous = MockMvcBuilders.standaloneSetup(new HealthController(system, sessions, content, ads, tap))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

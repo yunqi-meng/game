@@ -9,8 +9,22 @@ import java.util.Map;
 @Mapper
 public interface AdTicketMapper {
 
-    @Insert("INSERT INTO ad_ticket(ticket,user_id,kind,reward,amount,points,status,space_id,expires_at) " +
-            "VALUES(#{ticket},#{userId},#{kind},#{reward},#{amount},#{points},#{status},#{spaceId},#{expiresAt})")
+    /**
+     * 签发落库：{@code issued_at} 由实体带进来（应用侧的意图时刻），不再靠列上的
+     * {@code DEFAULT CURRENT_TIMESTAMP(3)}。
+     *
+     * <p>理由是"同一列只用一支钟"：这张表的 {@code expires_at} 本来就是 Java 写的，
+     * {@code expireStale} 与回调里的过期判断也全用 Java 的钟；而 G8/运营面板那几个窗口
+     * （{@link #statusCounts}/{@link #kindCounts}/{@link #purgeOld}）现在按应用侧的当天零点往回看。
+     * 若 {@code issued_at} 继续由库钟盖，库与进程时区不一致时"近 7 天"的漏斗就会少掉半天，
+     * 而玩家侧的"今天还能看几次"用的是另一套日子。内存台账 {@code MemAdTickets} 早就是 Java 盖的，
+     * 这条改动只是让生产与回归同一句话。
+     *
+     * <p>{@code rewarded_at} 仍由 SQL 的 {@code NOW(3)} 盖：它是"回调那一刻"的取证戳，谁都不拿它做判断，
+     * 与 {@code content_item}/{@code config} 上那两处 {@code ON UPDATE CURRENT_TIMESTAMP(3)} 同一类。
+     */
+    @Insert("INSERT INTO ad_ticket(ticket,user_id,kind,reward,amount,points,status,space_id,issued_at,expires_at) " +
+            "VALUES(#{ticket},#{userId},#{kind},#{reward},#{amount},#{points},#{status},#{spaceId},#{issuedAt},#{expiresAt})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(AdTicket t);
 
@@ -49,13 +63,28 @@ public interface AdTicketMapper {
     @Update("UPDATE ad_ticket SET status='expired' WHERE status='issued' AND expires_at < #{now}")
     int expireStale(java.time.LocalDateTime now);
 
+    /**
+     * 状态漏斗：{@code since} 由调用方算（见下面的默认方法），与 {@code expireStale} 用同一支进程钟。
+     *
+     * <p>以前写 {@code issued_at >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)}：窗口起点是库钟的"今天 00:00"，
+     * 而 {@code issued_at} 与过期判定用的是进程钟——运营在面板上看"近 7 天"时，库里若是 UTC、应用是 +08:00，
+     * 最早那半天会被切掉，条数对不上玩家侧实际看到的漏斗。
+     */
     @Select("SELECT status, COUNT(*) n FROM ad_ticket " +
-            "WHERE issued_at >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY) GROUP BY status")
-    List<Map<String, Object>> statusCounts(int days);
+            "WHERE issued_at >= #{since} GROUP BY status")
+    List<Map<String, Object>> statusCounts(@Param("since") java.time.LocalDateTime since);
+
+    default List<Map<String, Object>> statusCounts(int days) {
+        return statusCounts(java.time.LocalDate.now().minusDays(days).atStartOfDay());
+    }
 
     @Select("SELECT kind, COUNT(*) n FROM ad_ticket " +
-            "WHERE issued_at >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY) GROUP BY kind ORDER BY n DESC")
-    List<Map<String, Object>> kindCounts(int days);
+            "WHERE issued_at >= #{since} GROUP BY kind ORDER BY n DESC")
+    List<Map<String, Object>> kindCounts(@Param("since") java.time.LocalDateTime since);
+
+    default List<Map<String, Object>> kindCounts(int days) {
+        return kindCounts(java.time.LocalDate.now().minusDays(days).atStartOfDay());
+    }
 
     @Select("SELECT COUNT(*) FROM ad_ticket WHERE user_id=#{uid} AND status IN ('settled','rewarded')")
     long settledCount(long uid);
@@ -70,8 +99,13 @@ public interface AdTicketMapper {
     @Select("SELECT COUNT(*) FROM ad_ticket WHERE status IN ('issued','rewarded')")
     long pendingCount();
 
-    @Delete("DELETE FROM ad_ticket WHERE status IN ('settled','expired','void') AND issued_at < DATE_SUB(NOW(), INTERVAL #{days} DAY)")
-    int purgeOld(int days);
+    /** 清陈旧工单：保留窗口的起点由调用方算，与签发/过期用的同一支钟。 */
+    @Delete("DELETE FROM ad_ticket WHERE status IN ('settled','expired','void') AND issued_at < #{before}")
+    int purgeOld(@Param("before") java.time.LocalDateTime before);
+
+    default int purgeOld(int keepDays) {
+        return purgeOld(java.time.LocalDateTime.now().minusDays(keepDays));
+    }
 
     /** 删号（G6）：工单带 uid、广告位与奖励明细，属于本人数据，跟着账号一起走。 */
     @Delete("DELETE FROM ad_ticket WHERE user_id=#{uid}")

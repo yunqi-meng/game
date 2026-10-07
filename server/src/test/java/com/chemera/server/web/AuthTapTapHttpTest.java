@@ -19,6 +19,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Map;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -53,7 +55,7 @@ class AuthTapTapHttpTest {
                 "guest", false, "bound", true));
         // 默认"这一次登录还活着"；单独的用例里再把它改成撤销态
         sessions = mock(SessionMapper.class);
-        when(sessions.liveCount(anyLong(), anyLong())).thenReturn(1);
+        when(sessions.liveCount(anyLong(), anyLong(), any(LocalDateTime.class))).thenReturn(1);
         mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth, guard, tap, new SessionGuard(sessions, jwt)))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -94,7 +96,7 @@ class AuthTapTapHttpTest {
     @Test
     void revokedSessionLosesTheRightToMergeTheTrialSave() throws Exception {
         String stale = jwt.issue(7L, "user", "user", "游客ab12cd34", 4242L);
-        when(sessions.liveCount(4242L, 7L)).thenReturn(0);
+        when(sessions.liveCount(eq(4242L), eq(7L), any(LocalDateTime.class))).thenReturn(0);
 
         mvc.perform(post("/api/auth/taptap").header("Authorization", "Bearer " + stale)
                         .contentType(MediaType.APPLICATION_JSON)

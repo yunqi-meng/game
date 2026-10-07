@@ -5,6 +5,8 @@ import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+
 /**
  * 会话活体检查（A6）：令牌里那个 sid 对应的登录态还成立吗。
  *
@@ -30,7 +32,8 @@ public class SessionGuard {
     /** sid 缺失一律按失效处理：本轮上线前签发的老令牌就是这个形状，代价是玩家重登一次。 */
     public boolean live(Long sid, long uid) {
         if (sid == null || sid <= 0) return false;
-        return sessions.liveCount(sid, uid) > 0;
+        // 时钟从这里给，不从 SQL 的 NOW() 拿：见 SessionMapper.liveCount 的"谁判断，谁的时钟写"。
+        return sessions.liveCount(sid, uid, LocalDateTime.now()) > 0;
     }
 
     /**

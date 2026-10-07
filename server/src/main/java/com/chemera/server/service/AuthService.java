@@ -251,7 +251,7 @@ public class AuthService {
         saves.reassignUser(fromUid, toUid);
         saves.reassignRevisions(fromUid, toUid);
         analytics.reassignUser(fromUid, toUid);
-        sessions.revokeAll(fromUid);
+        sessions.revokeAll(fromUid, LocalDateTime.now());
         users.delete(fromUid);
     }
 
@@ -272,6 +272,11 @@ public class AuthService {
      * 刷新即轮换：本次使用的刷新令牌当场作废（rotated_at），只下发新的一对。
      * 三类令牌要分开对待——硬撤销（退出/改密/注销）绝不补发；被轮换掉的令牌在宽限期内
      * 视为多标签页并发刷新，超期再出现即按泄露处理，整户下线。
+     *
+     * <p>整段只用<b>一个</b> {@code now}：写 {@code rotated_at} 用的是它，判"是否超出宽限期"用的也是它，
+     * 连坐撤销时盖的仍是它。这里绝不能再引入第二个时钟（比如让 SQL 的 {@code NOW()} 去盖戳、
+     * 由 Java 来判），否则库与进程时区不一致时，"刚轮换"会被算成"早就过期"——
+     * 迭代 4 的 CI 首跑正是这样把玩家整户下线的（详见 {@link SessionMapper} 的注释）。
      */
     public Map<String, Object> refresh(String refresh) {
         if (refresh == null) throw BizException.unauthorized("缺少刷新令牌");
@@ -282,14 +287,14 @@ public class AuthService {
         if (s.getRevokedAt() != null) throw BizException.unauthorized("该登录态已注销，请重新登录");
         if (s.getRotatedAt() != null) {
             if (s.getRotatedAt().isBefore(now.minusSeconds(ROTATE_GRACE_SEC))) {
-                sessions.revokeAll(s.getUserId());
+                sessions.revokeAll(s.getUserId(), now);
                 log.warn("刷新令牌重用（超出轮换宽限期），已吊销 uid={} 的全部登录态", s.getUserId());
                 throw BizException.unauthorized("登录状态异常，请重新登录");
             }
         } else if (s.getExpiresAt() == null || s.getExpiresAt().isBefore(now)) {
             throw BizException.unauthorized("刷新令牌已过期");
         } else {
-            sessions.rotate(h);
+            sessions.rotate(h, now);
         }
         AppUser u = users.findById(s.getUserId());
         if (u == null) throw BizException.unauthorized("账号不存在");
@@ -297,7 +302,7 @@ public class AuthService {
     }
 
     public void logout(String refresh) {
-        if (refresh != null) sessions.revoke(sha(refresh));
+        if (refresh != null) sessions.revoke(sha(refresh), LocalDateTime.now());
     }
 
     public void changePassword(long uid, String oldPass, String newPass) {
@@ -306,7 +311,7 @@ public class AuthService {
             throw new BizException("原密码不正确");
         if (newPass == null || newPass.length() < 6) throw new BizException("新密码至少 6 位");
         users.updatePass(uid, enc.encode(newPass));
-        sessions.revokeAll(uid); // 改密后其余设备登录态失效
+        sessions.revokeAll(uid, LocalDateTime.now()); // 改密后其余设备登录态失效
     }
 
     /**
@@ -323,7 +328,7 @@ public class AuthService {
         if (newPass.equalsIgnoreCase(u.getUsername())) throw new BizException("新密码不能与用户名相同");
         users.updatePass(uid, enc.encode(newPass));
         // 整户刷新令牌作废：被盗设备最多还能用完手上的访问令牌（≤2h），续不了命
-        sessions.revokeAll(uid);
+        sessions.revokeAll(uid, LocalDateTime.now());
         log.info("管理员重置玩家口令 uid={} user={}", uid, u.getUsername());
     }
 

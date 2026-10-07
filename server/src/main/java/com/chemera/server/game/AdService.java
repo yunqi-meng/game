@@ -140,6 +140,8 @@ public class AdService {
         t.setPoints(cfg.viewPointsOr());
         t.setStatus(ISSUED);
         t.setSpaceId(spaceId);
+        // 与 expires_at 同一支钟：这一行的"今天"由意图时刻说了算，不由库的时区说了算
+        t.setIssuedAt(ldt(now));
         t.setExpiresAt(ldt(now + cfg.ttlSecOr() * 1000L));
         tickets.issue(t);
 

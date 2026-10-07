@@ -11,6 +11,7 @@ import com.chemera.server.mapper.UserMapper;
 import com.chemera.server.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
@@ -70,9 +71,9 @@ class AuthServiceRefreshTest {
 
         Map<String, Object> out = auth.refresh("old-token");
 
-        verify(sessions).rotate(anyString());               // 用过的立即作废
-        verify(sessions, never()).revoke(anyString());
-        verify(sessions, never()).revokeAll(anyLong());
+        verify(sessions).rotate(anyString(), any(LocalDateTime.class));   // 用过的立即作废
+        verify(sessions, never()).revoke(anyString(), any(LocalDateTime.class));
+        verify(sessions, never()).revokeAll(anyLong(), any(LocalDateTime.class));
         verify(sessions).insert(sessionRow(7L, "web"));
         assertNotEquals("old-token", out.get("refresh"));
         assertNotNull(out.get("token"));
@@ -84,7 +85,7 @@ class AuthServiceRefreshTest {
 
         BizException e = assertThrows(BizException.class, () -> auth.refresh("stolen-token"));
         assertEquals(401, e.code);
-        verify(sessions).revokeAll(7L);                     // 泄露处置：整户下线
+        verify(sessions).revokeAll(eq(7L), any(LocalDateTime.class));      // 泄露处置：整户下线
         verify(sessions, never()).insert(any(UserSession.class));
     }
 
@@ -93,11 +94,98 @@ class AuthServiceRefreshTest {
         given(session(null, LocalDateTime.now().minusSeconds(5), LocalDateTime.now().plusDays(1)));
 
         assertDoesNotThrow(() -> auth.refresh("second-tab-token"));
-        verify(sessions, never()).revokeAll(anyLong());
+        verify(sessions, never()).revokeAll(anyLong(), any(LocalDateTime.class));
         verify(sessions).insert(any(UserSession.class));
     }
 
-    /** 退出/改密/注销留下的硬撤销行，绝不能再换出新令牌。 */
+    /**
+     * CI 首跑那次红测的就是这条：盖 {@code rotated_at} 的钟和判"是否超出宽限期"的钟必须是同一支。
+     *
+     * <p>当时 {@code rotated_at}/{@code revoked_at} 由 SQL 的 {@code NOW()} 写（库在 UTC），
+     * 而 {@code AuthService.refresh} 拿 {@code LocalDateTime.now()}（应用在 +08:00）去判，
+     * 于是刚轮换完的那一行立刻被算成"超出 15 秒宽限期"→ 整户 {@code revokeAll} → 玩家被踢下线、
+     * 后面几十条断言级联成红。
+     *
+     * <p>这里能钉住的形式是"传进去的那支针"：mapper 收到的时间戳必须落在本用例自己量出的
+     * JVM 时间窗里（而不是库钟可能给出的那个数），并且**同一次调用**里判断用的和写下的相差不超过
+     * 一个毫秒级抖动。宽限期那侧用一支人为拨快 8 小时的"库钟"来反证——它必须把会话判死，
+     * 否则这条断言就只是空转。
+     */
+    @Test
+    void rotationGraceUsesTheSameClockItWrites() {
+        LocalDateTime before = LocalDateTime.now();
+        given(live());
+        auth.refresh("first-tab-token");
+        LocalDateTime after = LocalDateTime.now();
+
+        ArgumentCaptor<LocalDateTime> stamp = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(sessions).rotate(anyString(), stamp.capture());
+        LocalDateTime written = stamp.getValue();
+        assertFalse(written.isBefore(before.minusSeconds(1)),
+                "写进 rotated_at 的钟比本用例开始还早：" + written + "（看起来像库钟，不是 JVM 钟）");
+        assertFalse(written.isAfter(after.plusSeconds(1)),
+                "写进 rotated_at 的钟比本用例结束还晚：" + written);
+
+        // 反证：同一行如果由一支快了 8 小时的钟来判（迭代 4 CI 里库与进程的差），刚轮换也算"超期"
+        UserSession justRotated = session(null, written, LocalDateTime.now().plusDays(1));
+        given(justRotated);
+        assertDoesNotThrow(() -> auth.refresh("second-tab-token"), "自家钟下 15 秒内的并发刷新不该打死");
+        LocalDateTime shifted = written.minusHours(8);
+        given(session(null, shifted, LocalDateTime.now().plusDays(1)));
+        BizException e = assertThrows(BizException.class, () -> auth.refresh("third-tab-token"));
+        assertTrue(e.getMessage().contains("异常"), e.getMessage());
+    }
+
+    /** 退出是硬撤销：写下的仍然是进程那支钟（与 liveCount 的判断同一支）。 */
+    @Test
+    void logoutStampsWithTheAppClock() {
+        LocalDateTime before = LocalDateTime.now();
+        auth.logout("some-token");
+        ArgumentCaptor<LocalDateTime> stamp = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(sessions).revoke(anyString(), stamp.capture());
+        assertFalse(stamp.getValue().isBefore(before.minusSeconds(1))
+                        || stamp.getValue().isAfter(LocalDateTime.now().plusSeconds(1)),
+                "revoked_at 不该由库钟盖：" + stamp.getValue());
+    }
+
+    /**
+     * {@code live(sid,uid)} 的 {@code now} 也是调用方给的：会话活体检查判的是 {@code expires_at}，
+     * 那一列由 {@code token(u)} 用 JVM 钟写入——两支钟一旦不一致，玩家每次请求都在赌库的时区。
+     */
+    @Test
+    void sessionLivenessJudgedWithAppClock() {
+        when(sessions.liveCount(anyLong(), anyLong(), any(LocalDateTime.class))).thenReturn(1);
+        com.chemera.server.security.SessionGuard guard =
+                new com.chemera.server.security.SessionGuard(sessions,
+                        new JwtService("unit-test-secret-value-at-least-32-bytes-long", 60));
+        LocalDateTime before = LocalDateTime.now();
+        assertTrue(guard.live(1L, 7L));
+        ArgumentCaptor<LocalDateTime> stamp = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(sessions).liveCount(eq(1L), eq(7L), stamp.capture());
+        assertFalse(stamp.getValue().isBefore(before.minusSeconds(1))
+                        || stamp.getValue().isAfter(LocalDateTime.now().plusSeconds(1)),
+                "活体检查用的不是 JVM 现在：" + stamp.getValue());
+    }
+
+    /**
+     * 会话那一行的 {@code expires_at} 也必须是 JVM 钟写的——它是 {@code liveCount} 与
+     * {@code refresh} 两条判断共同比对的对象，两支钟错开就是"刚登录就过期"。
+     */
+    @Test
+    void sessionRowExpiryComesFromTheAppClock() {
+        given(live());
+        auth.refresh("first-tab-token");
+
+        ArgumentCaptor<UserSession> row = ArgumentCaptor.forClass(UserSession.class);
+        verify(sessions).insert(row.capture());
+        LocalDateTime exp = row.getValue().getExpiresAt();
+        assertTrue(exp.isAfter(LocalDateTime.now().plusDays(29)) && exp.isBefore(LocalDateTime.now().plusDays(31)),
+                "刷新令牌的到期时间不在 30 天窗口内：" + exp);
+        assertEquals(7L, row.getValue().getUserId());
+    }
+
+    /**
+     * 退出/改密/注销留下的硬撤销行，绝不能再换出新令牌。 */
     @Test
     void revokedSessionNeverReissues() {
         given(session(LocalDateTime.now().minusSeconds(1), null, LocalDateTime.now().plusDays(1)));
@@ -105,7 +193,7 @@ class AuthServiceRefreshTest {
         BizException e = assertThrows(BizException.class, () -> auth.refresh("logged-out-token"));
         assertTrue(e.getMessage().contains("注销"), e.getMessage());
         verify(sessions, never()).insert(any(UserSession.class));
-        verify(sessions, never()).revokeAll(anyLong());
+        verify(sessions, never()).revokeAll(anyLong(), any(LocalDateTime.class));
     }
 
     @Test
@@ -114,7 +202,7 @@ class AuthServiceRefreshTest {
 
         BizException e = assertThrows(BizException.class, () -> auth.refresh("dead-token"));
         assertTrue(e.getMessage().contains("过期"), e.getMessage());
-        verify(sessions, never()).revokeAll(anyLong());
+        verify(sessions, never()).revokeAll(anyLong(), any(LocalDateTime.class));
         verify(sessions, never()).insert(any(UserSession.class));
     }
 
@@ -146,7 +234,7 @@ class AuthServiceRefreshTest {
         auth.adminResetPassword(7L, "Helpdesk77");
 
         verify(users).updatePass(7L, "$2a$10$reset-hash");   // 落库的是哈希，不是明文
-        verify(sessions).revokeAll(7L);
+        verify(sessions).revokeAll(eq(7L), any(LocalDateTime.class));
     }
 
     @Test

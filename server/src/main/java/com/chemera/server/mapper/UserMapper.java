@@ -22,11 +22,25 @@ public interface UserMapper {
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertGuest(AppUser u);
 
-    @Update("UPDATE app_user SET pass_hash=#{h}, last_login_at=NOW() WHERE id=#{id}")
-    int updatePass(@Param("id") long id, @Param("h") String hash);
+    /**
+     * {@code last_login_at} 由调用方的时钟写，不用 SQL 的 {@code NOW()}：这一列正是按天统计的判据
+     * （{@code AnalyticsMapper.ACTIVE_ON} 拿 Java 算出来的当天去比、{@code loginTrend} 按它分桶），
+     * 写它的和被它判断的必须是同一个钟。详见 {@link SessionMapper} 里那条"谁判断，谁的时钟写"。
+     */
+    @Update("UPDATE app_user SET pass_hash=#{h}, last_login_at=#{now} WHERE id=#{id}")
+    int updatePass(@Param("id") long id, @Param("h") String hash,
+                   @Param("now") java.time.LocalDateTime now);
 
-    @Update("UPDATE app_user SET last_login_at=NOW() WHERE id=#{id}")
-    int touchLogin(long id);
+    default int updatePass(long id, String hash) {
+        return updatePass(id, hash, java.time.LocalDateTime.now());
+    }
+
+    @Update("UPDATE app_user SET last_login_at=#{now} WHERE id=#{id}")
+    int touchLogin(@Param("id") long id, @Param("now") java.time.LocalDateTime now);
+
+    default int touchLogin(long id) {
+        return touchLogin(id, java.time.LocalDateTime.now());
+    }
 
     @Update("UPDATE app_user SET nickname=#{nick} WHERE id=#{id}")
     int updateNickname(@Param("id") long id, @Param("nick") String nick);

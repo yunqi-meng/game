@@ -111,7 +111,7 @@ class AuthTapTapTest {
         verify(saves).reassignUser(7L, 900L);
         verify(saves).reassignRevisions(7L, 900L);
         verify(analytics).reassignUser(7L, 900L);
-        verify(sessions).revokeAll(7L);          // 游客的登录态必须撤干净，它已经没有账号了
+        verify(sessions).revokeAll(eq(7L), any(LocalDateTime.class));          // 游客的登录态必须撤干净，它已经没有账号了
         verify(users).delete(7L);
         assertEquals(Boolean.TRUE, out.get("merged"));
         assertEquals(Boolean.FALSE, out.get("guest"));
