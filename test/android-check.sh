@@ -217,6 +217,24 @@ elif [ -z "$APK_V" ] || [ -z "$SRC_V" ]; then
 else
   no "壳内前端是旧的" "APK=$APK_V 仓库=$SRC_V → 重跑 npx cap sync android"
 fi
+# 内容级同源裁判（2026-10-06 加）：上一版 APK 里 index.html 还带着仓库已删的 user-scalable=no，
+# 但因为只比 ?v=（两处同为 3.14），第 5 层照样绿——"版本号没顶、内容改了"这类分叉从此判得到。
+# 判法是最笨也最硬的：把壳里每个文本资产（js/css/html，生成物 app-config.js 除外）逐字节哈希对仓库。
+ASSET_DIFF=""
+for f in $(printf '%s' "$LIST" | sed -n 's|^assets/public/\(.*\)$|\1|p' | grep -E '\.(js|css|html|json)$' | grep -Ev '^(js/app-config\.js|cordova\.js|cordova_plugins\.js)$'); do
+  if [ ! -f "$ROOT/frontend/$f" ]; then ASSET_DIFF="$ASSET_DIFF 仓库没有:$f"; continue; fi
+  A=$(unzip -p "$APK" "assets/public/$f" 2>/dev/null | sha256sum | cut -d' ' -f1)
+  B=$(sha256sum "$ROOT/frontend/$f" | cut -d' ' -f1)
+  [ "$A" = "$B" ] || ASSET_DIFF="$ASSET_DIFF 内容不同:$f"
+done
+for f in $(cd "$ROOT/frontend" && find . \( -name '*.js' -o -name '*.css' -o -name '*.html' \) | sed 's|^\./||' | grep -v '^js/app-config\.js$'); do
+  printf '%s' "$LIST" | grep -q "^assets/public/$f$" || ASSET_DIFF="$ASSET_DIFF 壳里缺:$f"
+done
+if [ -z "$ASSET_DIFF" ]; then
+  ok "壳内前端与仓库逐字节同源（文本资产全量哈希比对）"
+else
+  no "壳内前端与仓库内容分叉（哪怕 ?v= 相同）" "差异:$ASSET_DIFF → 重跑 npx cap sync android 再 assembleDebug"
+fi
 # ⑤（方案 §4）商店版本号与资源版本号同源。gradle 现在从 frontend/index.html 读 ?v= 生成
 # versionName（见 android/app/build.gradle 的 frontendVersion），所以这条红的含义很具体：
 # 包里的 versionName 与包里的 assets/public/index.html 对不上 ⇒ 这次构建用的是同步之前的前端，

@@ -35,15 +35,23 @@ jobs:
       # 口令在这里生成，不在任何提交里出现；add-mask 让后续步骤把它们打码成 ***
       # 广告验签口令也一起生成：test/e2e-api.sh 里"真签名回调被受理"那条要走线上 SSV 路径，
       # 没有它就只能演"假签名被拒"，而线上最常坏的恰恰是真签名那一支（模板/大小写口径）。
+      #
+      # 位数不是随手写的：JwtService 构造里 `secret.getBytes(UTF_8) < 32` 直接抛异常，
+      # 所以 JWT 这一支必须给到 24 字节随机数（=48 个 hex 字符）。以前所有口令共用一个
+      # "20 字符"的生成器，于是本地永远绿、CI 红在"后端 2 分钟没就绪"上——日志尾部才是
+      # `chemera.jwt.secret 至少需 32 字节`，这类"起不来"永远先看日志再看代码。
       - name: 生成一次性口令
         run: |
-          gen() { openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20; }
+          gen() { openssl rand -hex "${1:-10}"; }   # 参数=随机字节数，输出两倍长度的 hex（全是 [0-9a-f]，无引号/换行风险）
           for v in MYSQL_ROOT_PASSWORD CHEMERA_DB_PASSWORD CHEMERA_BACKUP_PASSWORD \
-                   CHEMERA_JWT_SECRET CHEMERA_SEED_ADMIN_PASS CHEMERA_AD_SECURITY_KEY; do
-            val=$(gen)
+                   CHEMERA_SEED_ADMIN_PASS CHEMERA_AD_SECURITY_KEY; do
+            val=$(gen 10)
             echo "::add-mask::$val"
             echo "$v=$val" >> "$GITHUB_ENV"
           done
+          val=$(gen 24)                             # JWT 密钥：48 字符，越过 32 字节闸门并留足余量
+          echo "::add-mask::$val"
+          echo "CHEMERA_JWT_SECRET=$val" >> "$GITHUB_ENV"
 
       - name: 起 MySQL 8
         run: |
