@@ -216,6 +216,21 @@ if (ICON) {
   if (!r.errs.length) (r.info || []).forEach((i) => console.log("admin-paging:", i));
 })();
 
+/* H7：意图覆盖面的两端对账（见 test/intent-coverage.js）。
+   这个游戏的玩法面就是 POST /api/game/{intent} 一个口子：Java 的 switch(intent) 加分支，
+   前端多一个按钮，回归脚本若没跟着发那一枚意图，那条分支就永远只在脑测里跑过。
+   "少测了一个意图"在两份文件里都是合法代码，grep 判不动，只能对账：
+   全量意图从 GameService.java 的 switch(intent) 里读（不抄清单），已发意图从 e2e-api.sh 的
+   请求构造里读（含 act/act2 这类 helper 与 data-driven 表），差集必须为空——
+   除非那条意图在当前协议下真的正向日做不到，那要进 WHITELIST 并写一句理由，
+   否则不许假绿；WHITELIST 里的理由失效（意图已被测到或已从 Java 消失）同样报错。 */
+(() => {
+  const ic = require("./intent-coverage.js");
+  const r = ic.judgeFiles();
+  r.errs.forEach((e) => errs.push(e));
+  if (!r.errs.length) (r.info || []).forEach((i) => console.log("intent coverage:", i));
+})();
+
 /* H5：无障碍与可达性的静态裁判（对比度 / 命中区 / ARIA 结构 / 物质底色），见 test/a11y.js。
    这类问题截图看不出来、评审也容易划过：色值差一档、按钮矮 15px，代价却是某类玩家用不了。
    样式在 token 层判，所以三套皮肤一次判完；底色是内容数据，直接把沙箱里那份调色板递过去，

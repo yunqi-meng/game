@@ -14,7 +14,7 @@ ok(){ echo "  ✓ $1"; PASS=$((PASS+1)); }
 no(){ echo "  ✗ $1  → $2"; FAIL=$((FAIL+1)); }
 # jq-free JSON field extract via node
 jget(){ node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8"));let p=process.argv[1].split(".");let c=d;for(const k of p){c=c==null?null:c[k]}console.log(c==null?"":c)' "$1"; }
-jlen(){ node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8"));let p=process.argv[1].split(".");let c=d;for(const k of p){c=c==null?null:c[k]}console.log(Array.isArray(c)?c.length:0)' "$1"; }
+jlen(){ node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8"));let p=process.argv[1].split(".");let c=d;for(const k of p){c=c==null?null:c[k]}console.log(Array.isArray(c)?c.length:(c&&typeof c=="object"?Object.keys(c).length:0))' "$1"; }
 jhas(){ node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8"));let p=process.argv[1].split(".");let c=d;for(const k of p){c=c==null?null:c[k]}console.log(c&&Object.prototype.hasOwnProperty.call(c,process.argv[2])?"yes":"no")' "$1" "$2"; }
 # 发一个游戏意图，输出整帧 JSON
 act(){ curl -s -X POST "$BASE/api/game/$1" -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d "${2:-{\}}"; }
@@ -28,6 +28,16 @@ RB=$(curl -s "$BASE/api/content/bundle")
 # 关于内容包的断言都在拿一个布尔值当 JSON 判，红得毫无道理。回滚那一处已改名 ROLLBK。
 RC=$(echo "$RB" | node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log((d.content&&d.content.reaction||[]).length)')
 [ "$RC" -gt 100 ] && ok "bundle 反应数=$RC" || no "bundle 反应数=$RC" "期望>100"
+
+echo "== 本轮账号台账基线（文末自清拿它做对照） =="
+# 回归每跑一轮就往 app_user 里塞四五个号（注册档、游客档、TapTap 档），攒久了后台「用户管理」
+# 与看板的 totalUsers 全是测试号。文末「本轮账号自清」会把手上这些令牌/用户名解析出的 uid 逐个
+# DELETE /admin/api/users，所以这里要在**第一次建档之前**先记下总数当对照。
+# 令牌是另开一支 BOOT_T，不碰后面各段的 AT/AH：管理端登录是幂等的，多一次不影响任何断言。
+BOOT=$(curl -s -X POST "$BASE/admin/api/login" -H 'Content-Type: application/json' -d "{\"user\":\"$ADMIN_U\",\"pass\":\"$ADMIN_P\"}")
+BOOT_T=$(echo "$BOOT" | jget data.token)
+USERS0=$(curl -s "$BASE/admin/api/users?size=1" -H "Authorization: Bearer $BOOT_T" | jget data.total)
+[ -n "$USERS0" ] && ok "开跑前 app_user 总数=$USERS0（本轮建的号收尾都要还回去）" || no "账号台账基线" "$BOOT"
 
 echo "== 注册 / 登录 =="
 U="e2e$RANDOM$$"
@@ -67,6 +77,41 @@ LOST=$(curl -s -X POST "$BASE/api/auth/refresh" -H 'Content-Type: application/js
 BOUNCE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/refresh" -H 'Content-Type: application/json' -d '{"refresh":"0000000000000000000000000000dead"}')
 [ "$BOUNCE" = "401" ] && ok "陌生刷新令牌 401" || no "未知令牌" "http=$BOUNCE"
 
+echo "== 玩家自助改密（POST /api/auth/pass：这条端点以前两层测试都没打过） =="
+# 单开一个号走改密，因为成功那一步会把**整户会话撤销**（AuthService.changePassword 里的
+# sessions.revokeAll）——拿 $U/$T 来测就把前面几十条断言的账号当场打死。
+# 请求体全 ASCII：用户名与口令都不带中文，中文进 curl 的 argv 在这台机器上过 ANSI 代码页（见文末自清那段）。
+PU="e2epass$RANDOM$$"
+PREG=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -d "{\"user\":\"$PU\",\"pass\":\"pass1234\"}")
+PT=$(echo "$PREG" | jget data.token)
+PRS=$(echo "$PREG" | jget data.refresh)
+[ -n "$PT" ] && ok "改密专用的号建起来了（$PU）" || no "改密建档" "$PREG"
+# 闸门 1：原口令不对，什么都改不了
+BADOLD=$(curl -s -X POST "$BASE/api/auth/pass" -H "Authorization: Bearer $PT" -H 'Content-Type: application/json' -d '{"old":"wrong123","new":"brandnew1"}' | jget msg)
+[ "$BADOLD" = "原密码不正确" ] && ok "原口令不对就被拒（不给试探者留后门）" || no "改密验旧" "msg=$BADOLD"
+# 闸门 2：新口令过短同样被拒，而且**没被写进去**——用旧口令照样登得进
+SHORTNEW=$(curl -s -X POST "$BASE/api/auth/pass" -H "Authorization: Bearer $PT" -H 'Content-Type: application/json' -d '{"old":"pass1234","new":"123"}' | jget msg)
+[ "$SHORTNEW" = "新密码至少 6 位" ] && ok "新口令过短被拒：$SHORTNEW" || no "改密强度" "msg=$SHORTNEW"
+STILL=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"user\":\"$PU\",\"pass\":\"pass1234\"}" | jget ok)
+[ "$STILL" = "true" ] && ok "两次失败的改密一个字都没落库（旧口令照常登得进）" || no "失败改密动了库" "ok=$STILL"
+# 闸门 3：没被拒的请求不该顺手撤销会话——上面两次失败之后手上的令牌仍可用
+ALIVE=$(curl -s "$BASE/api/game/state" -H "Authorization: Bearer $PT" | jget code)
+[ "$ALIVE" = "0" ] && ok "被拒的改密不误伤当前会话（撤销只跟成功那一次）" || no "失败改密撤销了会话" "code=$ALIVE"
+# 成功那一路
+CHG=$(curl -s -X POST "$BASE/api/auth/pass" -H "Authorization: Bearer $PT" -H 'Content-Type: application/json' -d '{"old":"pass1234","new":"brandnew1"}')
+[ "$(echo "$CHG" | jget ok)" = "true" ] && ok "改密成功" || no "改密" "$CHG"
+OLDTOKEN=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/game/state" -H "Authorization: Bearer $PT")
+[ "$OLDTOKEN" = "401" ] && ok "改密即刻撤销整户登录态，手上那支访问令牌当场失效" || no "改密后旧令牌仍可用" "http=$OLDTOKEN"
+OLDREF=$(curl -s -X POST "$BASE/api/auth/refresh" -H 'Content-Type: application/json' -d "{\"refresh\":\"$PRS\"}" | jget code)
+[ "$OLDREF" != "0" ] && ok "旧刷新令牌一并作废（被盗设备续不了命）：code=$OLDREF" || no "改密后旧刷新令牌还能续" ""
+OLDBACK=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"user\":\"$PU\",\"pass\":\"pass1234\"}" | jget code)
+[ "$OLDBACK" = "401" ] && ok "旧口令再也登不进来" || no "旧口令仍可登录" "code=$OLDBACK"
+NEWOK=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"user\":\"$PU\",\"pass\":\"brandnew1\"}")
+NT=$(echo "$NEWOK" | jget data.token)
+[ -n "$NT" ] && ok "新口令登得进，换回来的是一支活令牌" || no "新口令登录" "$NEWOK"
+NS=$(curl -s "$BASE/api/game/state" -H "Authorization: Bearer $NT" | jget code)
+[ "$NS" = "0" ] && ok "新会话照常取到帧（改密没有把存档带走）" || no "新会话取帧" "code=$NS"
+
 echo "== 鉴权防爆破闸门 =="
 BF="e2ebf$RANDOM$$"
 LAST=""
@@ -76,7 +121,9 @@ done
 [ "$LAST" = "429" ] && ok "同一 IP+账号连续失败后转 429" || no "登录锁定" "code=$LAST"
 OTH=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"user\":\"$U\",\"pass\":\"pass1234\"}" | jget ok)
 [ "$OTH" = "true" ] && ok "锁定按账号隔离，其它账号照常登录" || no "锁定越界" "ok=$OTH"
-GGC=$(curl -s -X POST "$BASE/api/auth/guest" | jget code)
+# 令牌要留着：文末「本轮账号自清」靠它反查这个游客档的 uid（游客没有稳定用户名）。
+GG=$(curl -s -X POST "$BASE/api/auth/guest"); GGT=$(echo "$GG" | jget data.token)
+GGC=$(echo "$GG" | jget code)
 [ "$GGC" = "0" ] && ok "游客档在 IP 配额内仍可创建" || no "游客配额" "code=$GGC"
 
 echo "== 权威游戏帧 =="
@@ -784,7 +831,8 @@ NEWTK=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/jso
 T="$NEWTK"
 NOTSUPERPW=$(curl -s -X POST "$BASE/admin/api/users/reset-password?id=$PID" | jget code)
 [ "$NOTSUPERPW" = "401" ] && ok "无令牌不能重置口令(401)" || no "重置鉴权" "code=$NOTSUPERPW"
-curl -s -X POST "$BASE/api/auth/guest" >/dev/null
+# 这枚游客令牌同样留给文末的「本轮账号自清」反查 uid。
+XG=$(curl -s -X POST "$BASE/api/auth/guest"); XGT=$(echo "$XG" | jget data.token)
 GUEST_ROW=$(curl -s "$BASE/admin/api/users?size=1" -H "$AH" | node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8")).data.rows||[];let r=d[0]||{};console.log((r.is_guest===1||r.is_guest===true)?r.id:"")')
 [ -n "$GUEST_ROW" ] && ok "用户列表标得出游客档（id=$GUEST_ROW）" || no "游客标记" ""
 GR=$(curl -s -X POST "$BASE/admin/api/users/reset-password?id=$GUEST_ROW" -H "$AH" -H 'Content-Type: application/json' \
@@ -1490,40 +1538,58 @@ HASPLACE=$(echo "$INTS" | node -e '
 let d=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).intents||[];
 console.log(d.some(x=>x.intent==="bench.place")?"yes":"no")')
 [ "$HASPLACE" = "yes" ] && ok "读档→结算→写回那条全链路在表里（bench.place）" || no "意图缺项" "$INTS"
-# 预算读 minSql 而不是 avgSql。逐条点过（把 mapper 调到 DEBUG 看 ==> Preparing）：一条 claim.ach
-# 在温缓存下就是 4~5 条——会话校验、读帧、广告 settle、CAS 写回，没有 N+1。但它前面只要有过一次
-# 后台写内容（publishContent 失效缓存），那一条意图就要多跑 content_version / content_item /
-# app_config 三条把包重攒出来：那是运营动作的代价，不是结算链的形状。而这一层记的是进程内存，
-# 同一台服务端连着跑两轮 e2e，上一轮的样本还会继续摊进平均值。
-# 早先的口径是"取最小值天然就把重建滤掉了"，这句话只在混合样本时成立：G4 那一组（改 cond 看判定
-# 跟着变）每条意图前都跟一次内容写，而 claim.ach 在本轮**只**在那一段被调用——于是它的每一个样本
-# 都带着那三条，最小值稳稳报到 7，预算红在排期上而不是红在链路上（这一条真的红过一次）。
-# 现在服务端把"这次带着重建"单独标出来（ContentRegistry.rebuilds() 前后一比），minSql 只吃干净样本；
-# 全是重建样本的那条意图 minSql 直接给 null，本组就明说"这条没判"，绝不拿脏值当结论。
-# 预算没有因此变松：往结算里加的 N+1 是每次都发，干净样本的最小值照样被顶上来；
-# 而下面那条"至少 8 条意图有干净样本"钉的是尺子本身不能悄悄变成空转。
+# ============ 意图 SQL 预算：读 p50Sql（干净样本的中位数）============
+# 先说"干净样本"：没替内容缓存干过活、也没被 401/403/429 挡回去的那几次。两种脏样本都跟链的形状无关：
+#   ① 缓存的活——后台改一次内容就 publishContent() 失效缓存，紧跟的那条意图要多跑 content_version /
+#      content_item / app_config 三条把包重攒出来；ContentService 那份 1 秒版本号 TTL 到期时又多一条
+#      SELECT version。服务端把它们合成一个总账（ContentRegistry.cacheWork() = 重建次数 + 版本号真读库
+#      次数），意图前后一比就抓到；这条真的红过两次：一次是 claim.ach 只在"后台刚改过内容"那一段被调用
+#      （每个样本都带那三条，最小值稳稳报到 7），一次是 sandbox.exit 只在脚本最后被调到一次、恰好跨过
+#      TTL 边界（样本数 1，最小值等于那一次的运气，同一条链在 6 与 7 之间来回跳）。
+#   ② 被拒的那次——宵禁 403、令牌失效 401、限流 429 只走到会话校验就返回，回归里到处都是。
+# 再说为什么是中位数而不是最小或最大（都是逐条点出来的，把 mapper 调到 DEBUG 看 ==> Preparing）：
+#   最小值会量到便宜分支：market.consumable 的 minSql 是 1（会话缓存命中的那一次），而它最费的那条分支
+#   是 8；ad.request 最小 4（"上一次观看还没结束"那一支）最大 7（真签发）。往贵分支加一次 N+1，
+#   拿最小值当预算是量不到的——尺子看着在量，其实量的是最便宜的那条路。
+#   最大值会常红：state 第一次建档要多一条 INSERT 存档 + 版本行 + 清理，几乎每条链的上限都被这种一次性
+#   分支抬高过；那一列（maxCleanSql）留给人看最坏能坏到哪，不当预算。
+#   中位数两边都不骗：往结算里加的 N+1 是每次都发，中位数跟着涨。
+# 预算本身：默认 6 条。管道（会话校验、读帧、广告 settle、CAS 带号写回）占 4~5 条，剩下的额度才是这条链自己的。
+# 只有一条链申请了例外，理由写在下面的 cap() 里，不是把全局放松：
+#   ad.request 7 条 —— 签发要三写：查在途工单（一位一单，防"囤券刷回调"）、清过期、插新工单。
+#   已知可优化：把 expireStale 那次全表 UPDATE 挪出玩家点击路径能回到 6，但动的是广告工单的状态机
+#   （live() 不看 expires_at，挪走之前得先给它加时间条件），留作后续，不在本轮里顺手改发钱的链路。
+# 最后那条"至少 8 条意图有干净样本"钉的是尺子本身：几乎没有干净样本的话，预算就成了空转。
 SQLT=$(echo "$INTS" | node -e '
 let d=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).intents||[];
-let warm=d.filter(function(x){return typeof x.minSql==="number";});
+let cap=function(x){return x.intent==="ad.request"?7:6;};
+let warm=d.filter(function(x){return typeof x.p50Sql==="number";});
 function top(k,arr){let w={intent:"none",v:0};arr.forEach(function(x){if((+x[k]||0)>w.v)w={intent:x.intent,v:+x[k]||0};});return w;}
-let a=top("minSql",warm),b=top("avgSql",d);
-let cold=d.filter(function(x){return typeof x.minSql!=="number";}).map(function(x){return x.intent;});
-console.log(a.v+"|"+a.intent+"|"+b.v+"|"+b.intent+"|"+d.length+"|"+warm.length+"|"+cold.join(","));')
+let rank=warm.map(function(x){return {intent:x.intent,v:x.p50Sql,over:x.p50Sql-cap(x),cap:cap(x)};})
+             .sort(function(p,q){return (q.over-p.over)||(q.v-p.v);});
+let a=rank[0]||{intent:"none",v:0,over:99,cap:6};
+let b=top("avgSql",d);
+let cold=d.filter(function(x){return typeof x.p50Sql!=="number";}).map(function(x){return x.intent;});
+// 三列都在才算契约成立：只在"有干净样本的那几行"上查——null 会被线上的 NON_NULL 转换器整个抹掉，
+// 拿 "p50Sql" in x 去问一条全是脏样本的意图，红的是转换器不是尺子。
+let cols=warm.length>0&&warm.every(function(x){return typeof x.p50Sql==="number"&&typeof x.minSql==="number"&&typeof x.maxCleanSql==="number";})?"yes":"no";
+// 判定字段先在这儿比好，只往 bash 递一个"over/in"：负数当 argv 递给 node 会被当成命令行开关
+// （bad option: -2 → 非零退出），于是"最贴预算线的那条其实还差两条"这种健康情形反倒判成红。
+// 本组里 over 为负才是正常状态，所以这一步不能省。
+console.log([(a.over>0?"over":"in"),a.over,a.v,a.intent,a.cap,b.v,b.intent,d.length,warm.length,cols,cold.join(",")].join("|"));')
 # 拆分用 read + 独有变量名：这里绝不能再叫 T——$T 是本脚本从头用到尾的玩家令牌，
 # 拿它当临时变量会把后面每一句 act 都变成匿名请求（401），红得莫名其妙。
-IFS='|' read -r WORST CHAINWHO AVGW AVGWHO NINT NMIN COLDONLY <<<"$SQLT"
-[ "$NMIN" != "0" ] && [ -n "$NMIN" ] \
-  && ok "意图成本表带 minSql（$NINT 条意图里 $NMIN 条有干净样本：旧服务端没这一列就该红，不能让预算静默通过）" || no "minSql 缺列" "sqlt=$SQLT"
-# 尺子的自我检查：预算判的是"干净样本里的最费那条"，可如果几乎没有任何意图有干净样本，
-# 那这条预算就成了空转——所以要一个下限，本轮实际被测到的意图至少 8 条。
+IFS='|' read -r BUDGET OVER WORST CHAINWHO CAPT AVGW AVGWHO NINT NMIN COLS COLDONLY <<<"$SQLT"
+[ "$COLS" = "yes" ] && [ "$NMIN" != "0" ] \
+  && ok "意图成本表带 p50Sql / minSql / maxCleanSql 三列（$NINT 条意图里 $NMIN 条有干净样本：旧服务端缺列就该红，不能让预算静默通过）" || no "预算列缺项" "sqlt=$SQLT"
 node -e 'process.exit(Number(process.argv[1])>=8?0:1)' "$NMIN" \
-  && ok "本轮有 $NMIN 条意图带着干净样本进预算（不是空转）" || no "预算在空转" "只有 $NMIN 条意图有非重建样本"
+  && ok "本轮有 $NMIN 条意图带着干净样本进预算（不是空转）" || no "预算在空转" "只有 $NMIN 条意图有干净样本"
 [ -z "$COLDONLY" ] && ok "$NINT 条意图全都测到过干净样本" \
-  || ok "这几条本轮只在内容重建窗口被调到，不判它们的预算（重建的那三条 SELECT 不算链）：$COLDONLY"
+  || ok "这几条本轮只落在脏样本上（缓存的活或被拒的请求），不判它们的预算：$COLDONLY"
 [ -n "$NINT" ] && [ "$NINT" != "0" ] \
-  && ok "最费 SQL 的意图：链上 $CHAINWHO 要 $WORST 条，平均最费的是 $AVGWHO（$AVGW 条，多出来的是缓存重建摊进来的）" || no "读快照" "$INTS"
-node -e 'process.exit(Number(process.argv[1])<=6?0:1)' "$WORST" \
-  && ok "单次意图 ≤6 条 SQL（G8 给这条链定的预算，钉在没赶上内容重建的那些样本的最小值上：谁往结算里加一次 N+1，干净样本的最小值就会跟着涨）" || no "SQL 预算超支" "worst=$WORST intent=$CHAINWHO"
+  && ok "最贴预算线的意图：$CHAINWHO 中位数 $WORST 条（预算 $CAPT 条，超支 $OVER），平均最费的是 $AVGWHO（$AVGW 条，多出来的是脏样本摊进来的）" || no "读快照" "$INTS"
+[ "$BUDGET" = "in" ] \
+  && ok "单次意图 ≤6 条 SQL（ad.request 例外到 7：签发那三写；钉在干净样本的中位数上，谁往结算里加一次每次都发的查询，这个数就跟着涨）" || no "SQL 预算超支" "p50=$WORST cap=$CAPT intent=$CHAINWHO over=$OVER"
 ORDER=$(echo "$INTS" | node -e '
 let d=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).intents||[];
 console.log(d.every((x,i)=>i===0||d[i-1].count>=x.count)?"desc":"bad")')
@@ -1842,6 +1908,567 @@ process.exit(bad.length?1:0)' 2>&1)
 [ "$(curl -s "$BASE/admin/api/config?size=99999&off=-7" -H "$AH" | jget data.rows.0.cfgKey)" \
    = "$(curl -s "$BASE/admin/api/config?size=1" -H "$AH" | jget data.rows.0.cfgKey)" ] \
   && ok "负偏移不是「往前多要几行」，而是从第 1 页开始" || no "负偏移语义" ""
+
+echo "== 意图覆盖面（H7）之一：签到 / 提示 / 社交 / 排行榜 / 我的档案 =="
+# 裁判 test/intent-coverage.js 拿服务端的 switch (intent) 与本脚本实际打出去的意图对表，
+# 47 条协议面里只有 19 条被正向打过。下面几段把剩下的补齐。断言一律落在**整帧里的真状态**
+# （streak / rep / coins / bag / counters / 解锁表），而不是回执里那句 ok=true；
+# 已有段落测过的拒绝分支不重复演。真做不到的两条留给裁判的 WHITELIST 并写清理由。
+SG=$(act "sign")
+[ "$(echo "$SG" | jget data.result.ok)" = "true" ] && [ "$(echo "$SG" | jget data.result.day)" = "1" ] \
+  && ok "sign：连签第 1 天，按签到表第 1 档发 🪙$(echo "$SG" | jget data.result.coins)" || no "sign 首日" "$SG"
+[ "$(echo "$SG" | jget data.state.sign.streak)" = "1" ] \
+  && [ "$(echo "$SG" | jget data.state.sign.last)" = "$(echo "$SG" | jget data.state.daily.date)" ] \
+  && ok "签到把 streak/last 写进整帧（last 就是当日键 $(echo "$SG" | jget data.state.sign.last)）" || no "sign 落帧" "$SG"
+[ -n "$(echo "$SG" | jget data.result.gift)" ] \
+  && [ -n "$(echo "$SG" | jget "data.state.bag.$(echo "$SG" | jget data.result.gift)|0")" ] \
+  && ok "签到回礼真进了背包（$(echo "$SG" | jget data.result.gift) 已在 bag 里数得出）" || no "sign 回礼入包" "$SG"
+SG2=$(act "sign")
+[ "$(echo "$SG2" | jget data.result.ok)" = "false" ] && echo "$SG2" | grep -q "今日已签到" \
+  && ok "同日第二签被拒：$(echo "$SG2" | jget data.result.msg)" || no "重复签到没拦住" "$SG2"
+[ "$(echo "$SG2" | jget data.state.sign.streak)" = "1" ] \
+  && [ "$(echo "$SG2" | jget data.state.coins)" = "$(echo "$SG" | jget data.state.coins)" ] \
+  && ok "被拒那一签不落 streak、也不再发钱（余额与上一签同）" || no "重复签到偷偷发钱" "$SG2"
+
+# 提示：先券后币两条路都得真的扣东西，且给出来的必须是**这条方程式服务端还没知道**的那一条。
+H0=$(echo "$SG2" | jget data.state.hints); HC=$(echo "$SG2" | jget data.state.coins)
+HM=$(act "hint" '{"spendCoin":true}')
+[ "$(echo "$HM" | jget data.result.ok)" = "true" ] && [ -n "$(echo "$HM" | jget data.result.eq)" ] \
+  && ok "hint 指出一条尚未解锁的方程式（$(echo "$HM" | jget data.result.rid)：$(echo "$HM" | jget data.result.eq)）" || no "hint 无回执" "$HM"
+H1V=$(echo "$HM" | jget data.state.hints); C1V=$(echo "$HM" | jget data.state.coins)
+HGOOD=0
+if [ "${H0:-0}" -gt 0 ]; then [ "$H1V" = "$((H0 - 1))" ] && HGOOD=1
+else [ "$C1V" = "$((HC - 300))" ] && HGOOD=1; fi
+[ "$HGOOD" = "1" ] && ok "提示按「先券后币」计费（券 ${H0:-0}→$H1V、🪙$HC→$C1V，只走一条）" || no "hint 计费" "券 $H1V 币 $C1V 期望券 $((H0-1)) 或币 $((HC-300))"
+HS=$(echo "$HM" | jget data.result.rid)
+[ "$(echo "$HM" | node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8")).data;let k=d.result.rid;console.log(d.state.reactionsKnown&&d.state.reactionsKnown[k]===true?"known":"unknown")')" = "unknown" ] \
+  && ok "提示给的确实是还没解锁的那条（reactionsKnown 里查不到 $HS）" || no "hint 挑了已知方程式" "rid=$HS"
+
+# 社交：拜访有每日一次闸，回礼与内容表同一份；送礼回来的是声望与谢金。
+NPC=$(curl -s "$BASE/api/content/bundle" | node -e '
+let c=JSON.parse(require("fs").readFileSync(0,"utf8")).content||{};let n=c.npc||[];
+let x=n.filter(y=>y.gift&&y.gift.id)[0]||n[0]||{};console.log(x.id+" "+((x.gift&&x.gift.id)||""));')
+NPCID=${NPC%% *}; NPCGIFT=${NPC##* }
+V0=$(echo "$HM" | jget data.state.stats.visits); R0=$(echo "$HM" | jget data.state.rep)
+FV=$(act "friend.visit" "{\"npcId\":\"$NPCID\"}")
+[ "$(echo "$FV" | jget data.result.ok)" = "true" ] && [ "$(echo "$FV" | jget data.result.gift.id)" = "$NPCGIFT" ] \
+  && ok "friend.visit 收到该位好友的回礼（$NPCGIFT ×$(echo "$FV" | jget data.result.gift.n)），与内容表同一份" || no "friend.visit" "$FV"
+[ "$(echo "$FV" | jget data.state.stats.visits)" = "$((V0 + 1))" ] \
+  && ok "拜访计入整帧 stats.visits（$V0 → $(echo "$FV" | jget data.state.stats.visits)）" || no "visits 计数" "$FV"
+[ "$(echo "$FV" | jget "data.state.friends.$NPCID.lastVisit")" = "$(echo "$FV" | jget data.state.daily.date)" ] \
+  && ok "每日一次的键落在 friends.$NPCID.lastVisit（不是内存里记着玩玩的）" || no "拜访日记" "$FV"
+FV2=$(act "friend.visit" "{\"npcId\":\"$NPCID\"}")
+[ "$(echo "$FV2" | jget data.result.ok)" = "false" ] && [ "$(echo "$FV2" | jget data.result.again)" = "true" ] \
+  && [ "$(echo "$FV2" | jget data.state.stats.visits)" = "$((V0 + 1))" ] \
+  && ok "同日二访被拒且计数不重复加（again=true，visits 仍 $((V0+1))）" || no "拜访每日闸" "$FV2"
+FVB=$(act "friend.visit" '{"npcId":"npc-does-not-exist"}')
+[ "$(echo "$FVB" | jget data.result.ok)" = "false" ] && echo "$FVB" | grep -q "好友不存在" \
+  && ok "查无此人的拜访被点名拒绝（不是默默发一份空回礼）" || no "拜访假好友" "$FVB"
+G0=$(echo "$FV2" | jget "data.state.bag.$NPCGIFT|0")
+FG=$(act "friend.gift" "{\"npcId\":\"$NPCID\",\"id\":\"$NPCGIFT\",\"n\":1}")
+[ "$(echo "$FG" | jget data.result.ok)" = "true" ] && [ "$(echo "$FG" | jget data.result.thanks)" -gt 0 ] \
+  && ok "friend.gift 送出 1 份 $NPCGIFT，换回谢金 🪙$(echo "$FG" | jget data.result.thanks)" || no "friend.gift" "$FG"
+[ "$(echo "$FG" | jget data.state.rep)" = "$((R0 + 1))" ] \
+  && ok "送礼涨的是整帧里的声望（$R0 → $(echo "$FG" | jget data.state.rep)），下一笔买价就要按它算" || no "gift 声望" "$FG"
+[ "$(echo "$FG" | jget "data.state.bag.$NPCGIFT|0")" = "$((G0 - 1))" ] \
+  && ok "送出去的东西真的离开背包（$NPCGIFT $G0 → $(echo "$FG" | jget "data.state.bag.$NPCGIFT|0")）" || no "gift 扣包" "$FG"
+FGE=$(act "friend.gift" "{\"npcId\":\"$NPCID\",\"id\":\"$NPCGIFT\",\"n\":9999}")
+# 服务端的口径是**夹到持有量**而不是拒绝（EconomyService.giftToFriend: `n = Math.min(n, countAll)`）。
+# 这条断言要盯的不是"拒没拒"，而是那个夹击有没有夹干净：一个 9999 的请求
+# 不许造出物质、不许把 rep 按件数乘、不许把谢金按件数发——三样各钉一句。
+bagsum(){ echo "$1" | node -e 'let d=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).state.bag||{};let k=process.argv[1];let s=0;for(const q of [0,1,2]){let v=d[k+"|"+q];if(typeof v==="number")s+=v}console.log(s)' "$2"; }
+CNB=$(echo "$FG" | jget data.state.coins)
+TNB=$(echo "$FGE" | jget data.result.thanks)
+GCSUM=$(bagsum "$FG" "$NPCGIFT"); GC0=$(bagsum "$FGE" "$NPCGIFT")
+[ "$(echo "$FGE" | jget data.result.ok)" = "true" ] && [ "$GC0" = "0" ] \
+  && ok "n=9999 按持有量夹到 $GCSUM 件、全部送出（三档 grade 加起来 $GCSUM→0，不凭空多也不留负数）" || no "gift 夹量" "$FGE 期望 $NPCGIFT 总量 $GCSUM→0"
+[ "$(echo "$FGE" | jget data.state.rep)" = "$((R0 + 2))" ] \
+  && ok "一笔 9999 的赠送只涨 1 点声望（$((R0+1)) → $(echo "$FGE" | jget data.state.rep)，rep 不按件数乘）" || no "gift 声望翻倍" "$FGE 期望 rep=$((R0+2))"
+[ "$TNB" -gt 0 ] && [ "$(echo "$FGE" | jget data.state.coins)" = "$((CNB + TNB))" ] \
+  && ok "谢金也只发一次（🪙$CNB + $TNB，不按件数乘）" || no "gift 谢金按件数发" "$FGE 期望 $((CNB + TNB))"
+
+PREV=$(act "state" | jget data.revision)
+LB=$(act "leaderboard")
+LBL=$(echo "$LB" | jlen data.result)
+LBY=$(echo "$LB" | node -e 'let r=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).result||[];console.log(r.filter(x=>x.you===true).length+" "+r.filter(x=>x.n==null).length)')
+[ "$LBL" -ge 2 ] && [ "${LBY%% *}" = "1" ] && [ "${LBY##* }" = "0" ] \
+  && ok "leaderboard 下发 $LBL 行 NPC+自己，恰好 1 行标「你」、每行都带发现数" || no "leaderboard 行集" "rows=$LBL you/缺数=$LBY"
+[ "$(echo "$LB" | node -e 'let r=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).result||[];let n=r.map(x=>x.n);console.log(n.every((v,i)=>i===0||n[i-1]>=v)?"sorted":"unsorted")')" = "sorted" ] \
+  && ok "榜单按发现数降序（服务端排好的，客户端只管画）" || no "榜单排序" "$LB"
+[ "$(echo "$LB" | jget data.revision)" = "$PREV" ] \
+  && ok "排行榜是只读意图：整帧号没被推高（仍是 $PREV）" || no "leaderboard 写盘" "rev=$(echo "$LB" | jget data.revision) 期望 $PREV"
+
+ME=$(curl -s "$BASE/api/me" -H "Authorization: Bearer $T")
+[ "$(echo "$ME" | jget data.user)" = "$U" ] && [ "$(echo "$ME" | jget data.guest)" = "false" ] \
+  && ok "GET /api/me 回的就是这一个账号的档案（user=$U、guest=false）" || no "api/me 身份" "$ME"
+[ "$(echo "$ME" | jget data.exists)" = "true" ] && [ "$(echo "$ME" | jget data.revision)" = "$PREV" ] \
+  && ok "/api/me 带出云端存档（exists=true、revision=$PREV 与意图帧同号：客户端启动那一次核对读的就是它）" || no "api/me 存档" "$ME"
+[ "$(echo "$ME" | jget data.payload.level)" = "$(echo "$LB" | jget data.state.level)" ] \
+  && ok "/api/me 的 payload 与意图帧同一份存档（level 都是 $(echo "$ME" | jget data.payload.level)）" || no "api/me payload" "$(echo "$ME" | jget data.payload.level)"
+
+echo "== 意图覆盖面（H7）之二：取回 / 换容器 / 卖货 / 挂单 / 今日特惠 =="
+# 这三条 bench.* 与三条市场动作是"玩家每天都在用"的那半边，此前一次都没正向打过。
+BI=$(echo "$LB" | jget data.state.bi)
+VB=$(act "bench.vessel" '{"id":"flask"}')
+[ "$(echo "$VB" | jget data.result.ok)" = "false" ] && echo "$VB" | grep -q "尚未拥有该仪器" \
+  && ok "bench.vessel 挡在拥有权前面：没买过的容器当场拒" || no "换没拥有的容器" "$VB"
+[ "$(echo "$LB" | jget "data.state.benchStates.$BI.vessel")" = "beaker" ] \
+  && ok "拒掉那一次之后帧里的容器还是 beaker（拒绝不留副作用）" || no "拒绝写了副作用" "$VB"
+VT=$(act "bench.vessel" '{"id":"testtube"}')
+[ "$(echo "$VT" | jget data.result.ok)" = "true" ] && [ "$(echo "$VT" | jget "data.state.benchStates.$BI.vessel")" = "testtube" ] \
+  && ok "bench.vessel 换到已拥有的试管并落进 benchStates[$BI].vessel" || no "bench.vessel" "$VT"
+act "bench.vessel" '{"id":"beaker"}' >/dev/null
+
+# 台面上的料要从背包来（非沙盒路径先验库存），所以先把原料补齐再投放。
+act "market.buy" '{"id":"H2","amt":10}' >/dev/null
+act "market.buy" '{"id":"O2","amt":10}' >/dev/null
+TB0=$(act "state" | jget 'data.state.bag.H2|0')
+act "bench.place" '{"id":"H2","n":3}' >/dev/null
+TB1=$(act "state" | jget 'data.state.bag.H2|0')
+[ "$TB1" = "$((TB0 - 3))" ] && ok "投放先把 3 份 H2 从背包搬上台面（$TB0 → $TB1）" || no "投放扣包" "$TB0 → $TB1"
+TBK=$(act "bench.takeBack" '{"id":"H2"}')
+[ "$(echo "$TBK" | jget data.result.ok)" = "true" ] \
+  && [ "$(echo "$TBK" | jget 'data.state.bag.H2|0')" = "$TB0" ] \
+  && [ -z "$(echo "$TBK" | jget "data.state.benchStates.$BI.placed.H2")" ] \
+  && ok "bench.takeBack 把整份 H2 原数收回背包（$TB1 → $(echo "$TBK" | jget 'data.state.bag.H2|0')），台面上清空" || no "bench.takeBack" "$TBK"
+TBK2=$(act "bench.takeBack" '{"id":"H2"}')
+[ "$(echo "$TBK2" | jget 'data.state.bag.H2|0')" = "$TB0" ] \
+  && ok "台面已空时再取回一次不会无中生有（背包仍是 $TB0）" || no "空取回增发" "$TBK2"
+
+act "bench.place" '{"id":"H2","n":4}' >/dev/null
+act "bench.place" '{"id":"O2","n":2}' >/dev/null
+RW=$(act "react" '{"multiplier":2}')
+# 产率折损是引擎按品质/安全设施概率决定的（failChance≈0.2），所以这里不钉死"必产 4 份"，
+# 而是拿回执里那一实际产量当基准，往下验背包一分不差地跟着它走。
+HP=$(echo "$RW" | jget 'data.result.produced.H2O'); HP=${HP:-0}
+[ "$(echo "$RW" | jget data.result.ok)" = "true" ] && [ "$HP" -ge 2 ] \
+  && ok "批量合成一把产 $HP 份水（multiplier=2 真的乘进了结算，产率折损时少一半）" || no "批量反应" "$RW"
+SL0=$(echo "$RW" | jget data.state.coins); SS0=$(echo "$RW" | jget data.state.stats.sold)
+SLN=$(act "market.sell" '{"id":"H2O","q":0,"n":1}')
+SLP=$(echo "$SLN" | jget data.result.price)
+[ "$(echo "$SLN" | jget data.result.ok)" = "true" ] && [ "${SLP:-0}" -gt 0 ] && [ "$(echo "$SLN" | jget data.result.n)" = "1" ] \
+  && ok "market.sell 按服务端定价卖掉 1 份水（🪙$SLP，含首次出售加成）" || no "market.sell" "$SLN"
+[ "$(echo "$SLN" | jget data.state.coins)" = "$((SL0 + SLP))" ] \
+  && ok "卖价一分不多一分不少地进整帧（$SL0 → $(echo "$SLN" | jget data.state.coins)）" || no "卖货入账" "$SL0 + $SLP → $(echo "$SLN" | jget data.state.coins)"
+[ "$(echo "$SLN" | jget 'data.state.bag.H2O|0')" = "$((HP - 1))" ] && [ "$(echo "$SLN" | jget data.state.stats.sold)" = "$((SS0 + 1))" ] \
+  && ok "卖掉的那份从背包划走、销量计数 +1（H2O $HP→$(echo "$SLN" | jget 'data.state.bag.H2O|0')、sold $SS0→$(echo "$SLN" | jget data.state.stats.sold)）" || no "卖货扣包" "$SLN"
+# 挂单与"超量直售"都要消耗水，而一次反应在产率折损时只产 1~2 份、还可能整个炸掉，
+# 所以先把水位补到一个实测数字上（最多试三把），后面所有断言都跟着这个基准走，不猜 HP 够不够。
+WB0=0
+for _t in 1 2 3; do
+  act "bench.place" '{"id":"H2","n":4}' >/dev/null
+  act "bench.place" '{"id":"O2","n":2}' >/dev/null
+  WB=$(act "react" '{"multiplier":1}')
+  WB0=$(echo "$WB" | jget 'data.state.bag.H2O|0'); WB0=${WB0:-0}
+  [ "$WB0" -ge 2 ] && break
+done
+[ "$WB0" -ge 2 ] && ok "再合成一把把水位补到 $WB0 份（下面的挂单与超量直售都拿它当基准）" || no "补水" "$WB"
+LB0=$(echo "$WB" | jlen data.state.listings)
+BC=$(act "market.consumable" '{"id":"reagentbottle","n":1}')
+[ "$(echo "$BC" | jget data.result.ok)" = "true" ] \
+  && [ "$(echo "$BC" | jget 'data.state.bag.reagentbottle|0')" = "1" ] \
+  && ok "挂单要用的试剂瓶从耗材区买到（bag 数得出 1 只）" || no "买试剂瓶" "$BC"
+LST=$(act "listing.create" '{"id":"H2O","q":0,"n":1,"mult":1.2}')
+[ "$(echo "$LST" | jget data.result.ok)" = "true" ] && [ "$(echo "$LST" | jlen data.state.listings)" = "$((LB0 + 1))" ] \
+  && ok "listing.create 挂出一笔商会代售（挂单 $LB0 → $(echo "$LST" | jlen data.state.listings)）" || no "listing.create" "$LST"
+# 扣到 0 的那一项，服务端是**整个键从背包里消失**（不是留一个 0 在那儿），所以两侧都归一成 0 再比。
+WBA=$(echo "$LST" | jget 'data.state.bag.H2O|0'); WBA=${WBA:-0}
+BTA=$(echo "$LST" | jget 'data.state.bag.reagentbottle|0'); BTA=${BTA:-0}
+[ "$WBA" = "$((WB0 - 1))" ] && [ "$BTA" = "0" ] \
+  && ok "挂单同时扣掉货与包装（H2O $WB0→$WBA、试剂瓶 1→$BTA，扣到 0 的键直接从背包消失）：不是白挂" || no "挂单扣料" "H2O $WB0→$WBA、瓶 $BTA"
+[ "$(echo "$LST" | node -e 'let s=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).state||{};let A=s.listings||[];let L=A[A.length-1]||{};console.log(L.id==="H2O"&&L.n===1&&L.price>0&&L.mat>Date.now()-60000?"ok":"bad:"+JSON.stringify(L))')" = "ok" ] \
+  && ok "挂单行带得出货、价与到期时刻（客户端那句「约 N 秒后商会结算」就靠它）" || no "挂单行内容" "$LST"
+LSB=$(act "listing.create" '{"id":"H2O","q":0,"n":99}')
+[ "$(echo "$LSB" | jget data.result.ok)" = "false" ] && echo "$LSB" | grep -q "数量不足" \
+  && ok "手里没那么多货就挂不出去（拒绝理由说的是数量）" || no "挂单超量" "$LSB"
+
+# 直售超量：服务端的口径是**夹到持有量**（instantSell 里 n=min(要卖, 有货)），不是拒绝。
+# 所以三样各钉一句：实际卖掉的数量、背包见底、销量计数只按真实卖出数涨。
+WT0=$(echo "$LSB" | jget data.state.stats.sold)
+SL2=$(act "market.sell" '{"id":"H2O","q":0,"n":999}')
+SL2N=$(echo "$SL2" | jget data.result.n); SL2N=${SL2N:-0}
+[ "$(echo "$SL2" | jget data.result.ok)" = "true" ] && [ "$SL2N" = "$((WB0 - 1))" ] \
+  && [ -z "$(echo "$SL2" | jget 'data.state.bag.H2O|0')" ] \
+  && [ "$(echo "$SL2" | jget data.state.stats.sold)" = "$((WT0 + SL2N))" ] \
+  && ok "超出持有量的直售被夹到真实持有量（要 999 → 只卖 $SL2N 份：背包见底、sold 只按卖出数涨 $WT0→$(echo "$SL2" | jget data.state.stats.sold)）" || no "卖货超量" "$SL2"
+
+SPID=$(act "state" | jget data.state.market.specials.0.id)
+SP0=$(act "state" | jget data.state.coins); TR0=$(act "state" | jget data.state.stats.trades)
+if [ -n "$SPID" ]; then
+  SP=$(act "market.special" "{\"id\":\"$SPID\"}")
+  SPC=$(echo "$SP" | jget data.result.cost)
+  { [ "$(echo "$SP" | jget data.result.ok)" = "true" ] && [ "${SPC:-0}" -gt 0 ]; } \
+    && ok "market.special 买走今日特惠的 $SPID（按表内折扣价 🪙$SPC）" || no "market.special" "$SP"
+  [ "$(echo "$SP" | jget data.state.coins)" = "$((SP0 - SPC))" ] && [ "$(echo "$SP" | jget data.state.stats.trades)" = "$((TR0 + 1))" ] \
+    && ok "特惠按回执金额扣款、成交计数 +1（🪙$SP0→$(echo "$SP" | jget data.state.coins)）" || no "特惠扣款" "$SP"
+  [ "$(echo "$SP" | jget "data.state.market.specialBuy.$SPID")" = "1" ] \
+    && ok "限购记在帧里（specialBuy.$SPID=1），不是客户端自己数的" || no "特惠限购记账" "$SP"
+  ACT=$(act "state" | jlen data.state.market.specials)
+  SPX=$(act "market.special" '{"id":"NoSuchThing"}')
+  [ "$ACT" -ge 1 ] && [ "$(echo "$SPX" | jget data.result.ok)" = "false" ] && echo "$SPX" | grep -q "今日没有" \
+    && ok "今日目录外的 id 被拒（清单里 $ACT 件，没有 NoSuchThing）" || no "特惠目录闸门" "$SPX"
+else
+  no "今日特惠清单" "market.specials 为空，特惠面没法正向覆盖"
+fi
+
+echo "== 意图覆盖面（H7）之三：升级族 / 提纯 / 换台（先把人抬到解锁线） =="
+# upgrade.* 五条与 refine 都有等级线／金币线，Lv.1 的新档根本够不着（坩埚 Lv.11、分析室 6 万金币）。
+# 这里不伪造余额，用的是 G4 已经证明过的两把正规尺子：把 level_exp 拨平（每级 20 经验），
+# 再用后台资产口按正常上限补币——两条都是线上真存在的路径，用完当场复原并回读确认。
+HL0=$(getcfg level_exp)
+putcfg '{"key":"level_exp","value":{"base":20,"coef":0}}' >/dev/null
+LVF=$(act "state"); LV0=$(echo "$LVF" | jget data.state.level)
+for LVTRY in 1 2 3 4; do
+  act "market.buy" '{"id":"H2","amt":20}' >/dev/null
+  act "market.buy" '{"id":"O2","amt":20}' >/dev/null
+  act "bench.place" '{"id":"H2","n":20}' >/dev/null
+  act "bench.place" '{"id":"O2","n":10}' >/dev/null
+  LVF=$(act "react" '{"multiplier":10}')
+  LVN=$(echo "$LVF" | jget data.state.level)
+  [ "${LVN:-1}" -ge 16 ] && break
+done
+[ "${LVN:-1}" -ge 16 ] \
+  && ok "拨平升级曲线后 $LVTRY 轮批量合成就站到 Lv.$LVN（曲线是配置决定的，不是代码写死的）" || no "抬等级" "level=$LVN 起点 $LV0"
+putcfg "{\"key\":\"level_exp\",\"value\":$HL0}" >/dev/null
+[ "$(getcfg level_exp)" = "$HL0" ] \
+  && ok "升级曲线当场复原并回读到（$HL0）：借的尺子不留给下一轮回归" || no "复原 level_exp" "$(getcfg level_exp)"
+TOP=$(curl -s -X POST "$BASE/admin/api/users/assets?id=$PID" -H "$AH" -H 'Content-Type: application/json' -d '{"coins":300000}')
+TOPC=$(echo "$TOP" | jget data.coinsAfter)
+[ "$(echo "$TOP" | jget ok)" = "true" ] && [ "$(act "state" | jget data.state.coins)" = "$TOPC" ] \
+  && ok "解锁项要的币走后台资产口（单笔上限内），下一帧玩家侧余额就是 $TOPC" || no "补币" "$TOP"
+
+UL=$(act "upgrade.lab" '{"key":"storage"}')
+[ "$(echo "$UL" | jget data.result.ok)" = "true" ] && [ "$(echo "$UL" | jget data.state.lab.storage)" = "1" ] \
+  && ok "upgrade.lab 把储物柜扩容买到 Lv.1（整帧 lab.storage 0→1）" || no "upgrade.lab" "$UL"
+[ "$(echo "$UL" | jget data.state.coins)" = "$((TOPC - $(echo "$UL" | jget data.result.cost)))" ] \
+  && ok "实验室升级按回执扣款（🪙$TOPC → $(echo "$UL" | jget data.state.coins)）" || no "lab 扣款" "$UL"
+ULB=$(act "upgrade.lab" '{"key":"nosuchUpgrade"}')
+[ "$(echo "$ULB" | jget data.result.ok)" = "false" ] && echo "$ULB" | grep -q "未知升级项" \
+  && ok "配置里没有的升级项被点名拒绝（不会扣一笔看不见的钱）" || no "lab 未知项" "$ULB"
+
+UV=$(act "upgrade.vessel" '{"id":"flask"}')
+[ "$(echo "$UV" | jget data.result.ok)" = "true" ] && [ "$(echo "$UV" | jget data.state.vessels.flask.owned)" = "true" ] \
+  && ok "upgrade.vessel 买下锥形瓶并写进 vessels.flask（Lv.6 那条解锁线过了）" || no "upgrade.vessel" "$UV"
+UVD=$(act "upgrade.vessel" '{"id":"flask"}')
+[ "$(echo "$UVD" | jget data.result.ok)" = "false" ] && echo "$UVD" | grep -q "已拥有" \
+  && ok "同一件容器买第二次被拒（不是再扣一次钱）" || no "容器重复购买" "$UVD"
+UVN=$(act "upgrade.vessel" '{"id":"nosuchInstrument"}')
+[ "$(echo "$UVN" | jget data.result.ok)" = "false" ] && echo "$UVN" | grep -q "仪器不存在" \
+  && ok "内容表里没有的仪器 id 被拒" || no "容器假 id" "$UVN"
+
+RFB=$(act "refine" '{"fromQ":0,"toQ":1,"need":5}')
+[ "$(echo "$RFB" | jget data.result.ok)" = "false" ] && echo "$RFB" | grep -q "需要分光光度计" \
+  && ok "没买分光光度计时提纯被拒：升级设备那条路是 refine 的唯一入口" || no "refine 前置闸门" "$RFB"
+UE=$(act "upgrade.equipment" '{"id":"spectrometer"}')
+[ "$(echo "$UE" | jget data.result.ok)" = "true" ] && [ "$(echo "$UE" | jget data.state.equipment.spectrometer)" = "true" ] \
+  && ok "upgrade.equipment 买下 Lv.16 的分光光度计（equipment.spectrometer=true）" || no "upgrade.equipment" "$UE"
+UED=$(act "upgrade.equipment" '{"id":"lamp"}')
+[ "$(echo "$UED" | jget data.result.ok)" = "false" ] && echo "$UED" | grep -q "已装备" \
+  && ok "已装备的设备不能再买一遍（酒精灯不会重复扣钱）" || no "设备重复购买" "$UED"
+
+UTC=$(act "upgrade.tier" '{"id":"beaker"}')
+[ "$(echo "$UTC" | jget data.result.ok)" = "true" ] && [ "$(echo "$UTC" | jget data.result.tier)" = "1" ] \
+  && [ "$(echo "$UTC" | jget data.state.vessels.beaker.tier)" = "1" ] \
+  && ok "upgrade.tier 把烧杯升到第 2 档（tier 0→1，提档费按 tier_up_cost 表算）" || no "upgrade.tier" "$UTC"
+act "upgrade.tier" '{"id":"beaker"}' >/dev/null
+UTD=$(act "upgrade.tier" '{"id":"beaker"}')
+[ "$(echo "$UTD" | jget data.result.ok)" = "false" ] && echo "$UTD" | grep -q "已满级" \
+  && ok "第三档不存在：满级后继续提档被拒（tier 停在 2）" || no "tier 上限" "$UTD"
+UTN=$(act "upgrade.tier" '{"id":"condenser"}')
+[ "$(echo "$UTN" | jget data.result.ok)" = "false" ] && echo "$UTN" | grep -q "未拥有该容器" \
+  && ok "没买过的东西提不了档（拒绝理由说的是拥有权）" || no "tier 未拥有" "$UTN"
+
+UR=$(act "upgrade.room" '{"id":"analysis"}')
+[ "$(echo "$UR" | jget data.result.ok)" = "true" ] && [ "$(echo "$UR" | jlen data.state.rooms)" = "2" ] \
+  && ok "upgrade.room 开出分析化学室：rooms 1→2，6 万金币的门槛在 Lv.12 之后" || no "upgrade.room" "$UR"
+URD=$(act "upgrade.room" '{"id":"analysis"}')
+[ "$(echo "$URD" | jget data.result.ok)" = "false" ] && echo "$URD" | grep -q "已拥有该房间" \
+  && ok "同一间房子不卖两次" || no "房间重复购买" "$URD"
+[ "$(echo "$UR" | jlen data.state.benchStates)" = "2" ] \
+  && ok "多一间房就多一张台：ensureBenches 把 benchStates 撑到 2 张" || no "台位随房间增长" "$UR"
+BS1=$(act "bench.switch" '{"index":1}')
+[ "$(echo "$BS1" | jget data.result.ok)" = "true" ] && [ "$(echo "$BS1" | jget data.state.bi)" = "1" ] \
+  && ok "bench.switch 切到第 2 张台并把 bi 落在整帧里" || no "bench.switch" "$BS1"
+BS2=$(act "bench.switch" '{"index":9}')
+[ "$(echo "$BS2" | jget data.result.ok)" = "false" ] && [ "$(echo "$BS2" | jget data.state.bi)" = "1" ] \
+  && ok "切到不存在的台位被拒且 bi 不动（越界不会把玩家扔进空气里）" || no "switch 越界" "$BS2"
+act "bench.switch" '{"index":0}' >/dev/null
+act "market.buy" '{"id":"Cu","amt":8}' >/dev/null
+RFB2=$(act "refine" '{"fromQ":0,"toQ":1,"need":9999}')
+[ "$(echo "$RFB2" | jget data.result.ok)" = "false" ] && echo "$RFB2" | grep -q "没有持有量" \
+  && ok "持有量不够时提纯被拒（拒绝理由带着那个门槛数字）" || no "refine 持有量闸门" "$RFB2"
+RB0=$(act "state")
+RF=$(act "refine" '{"fromQ":0,"toQ":1,"need":5}')
+RFID=$(echo "$RF" | jget data.result.id)
+RA0=$(echo "$RB0" | jget "data.state.bag.$RFID|0"); RA1=$(echo "$RF" | jget "data.state.bag.$RFID|0")
+RQ0=$(echo "$RB0" | jget "data.state.bag.$RFID|1"); RQ0=${RQ0:-0}; RQ1=$(echo "$RF" | jget "data.state.bag.$RFID|1")
+[ "$(echo "$RF" | jget data.result.ok)" = "true" ] && [ -n "$RFID" ] \
+  && ok "refine 服务端自己挑出够提的一摞（$RFID：q0 攒够 5 份才折 1 份 q1）" || no "refine" "$RF"
+[ "$RA1" = "$((RA0 - 5))" ] && [ "$RQ1" = "$((RQ0 + 1))" ] \
+  && ok "提纯真的搬运了整帧背包（$RFID q0 $RA0→$RA1、q1 $RQ0→$RQ1）" || no "refine 背包账" "$RFID $RA0/$RA1 $RQ0/$RQ1"
+
+echo "== 意图覆盖面（H7）之四：每日任务 / 图鉴里程碑 / 商会订单 =="
+MSN=$(getcfg milestones | node -e 'let a=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(Array.isArray(a)&&a.length?a[0]:"")')
+MSN=${MSN:-20}
+for HID in $(curl -s "$BASE/api/content/bundle" | node -e '
+let c=JSON.parse(require("fs").readFileSync(0,"utf8")).content||{};
+console.log((c.element||[]).filter(x=>x.price<=30).map(x=>x.id).slice(0,28).join(" "));'); do
+  act "market.buy" "{\"id\":\"$HID\",\"amt\":1}" >/dev/null
+done
+DIS=$(act "state" | jlen data.state.discovered)
+[ "${DIS:-0}" -ge "${MSN:-20}" ] && ok "图鉴攒到 $DIS 种，跨过第一个里程碑（$MSN）" || no "图鉴数量" "discovered=$DIS 门槛=$MSN"
+MBEFORE=$(act "state" | jget data.state.coins)
+CM=$(act "claim.milestone" "{\"index\":0}")
+[ "$(echo "$CM" | jget data.result.ok)" = "true" ] && [ "$(echo "$CM" | jget data.result.coins)" = "$((MSN * 100))" ] \
+  && ok "claim.milestone 按表发节点奖（第 1 档 $MSN 种 → 🪙$(echo "$CM" | jget data.result.coins)）" || no "claim.milestone" "$CM"
+[ "$(echo "$CM" | jget data.state.coins)" = "$((MBEFORE + MSN * 100))" ] \
+  && ok "节点奖一分不差进整帧（$MBEFORE → $(echo "$CM" | jget data.state.coins)）" || no "里程碑入账" "$CM"
+[ "$(echo "$CM" | jget "data.state.milestones.$MSN")" = "true" ] \
+  && ok "领取状态记在帧里（milestones.$MSN=true），换设备也不会重领" || no "里程碑记账" "$CM"
+CMD=$(act "claim.milestone" '{"index":0}')
+[ "$(echo "$CMD" | jget data.result.ok)" = "false" ] && [ "$(echo "$CMD" | jget data.state.coins)" = "$(echo "$CM" | jget data.state.coins)" ] \
+  && ok "同一档领第二次被拒且不再发钱" || no "里程碑重复领" "$CMD"
+CMN=$(act "claim.milestone" '{"index":99}')
+[ "$(echo "$CMN" | jget data.result.ok)" = "false" ] && echo "$CMN" | grep -q "无此节点" \
+  && ok "越界的档位序号被拒（不是静默 no-op）" || no "里程碑越界" "$CMN"
+
+TASK=$(curl -s "$BASE/api/content/bundle" | node -e '
+let c=JSON.parse(require("fs").readFileSync(0,"utf8")).content||{};
+let t=(c.task||[]).filter(x=>x.key==="trade")[0]||(c.task||[])[0]||{};
+console.log((t.id||"")+" "+(t.reward||0));')
+TID=${TASK%% *}; TPAY=${TASK##* }
+TN=$(act "state" | jget "data.state.daily.counters.trade"); TN=${TN:-0}
+[ "${TN:-0}" -ge 1 ] && ok "今日任务计数在帧里数得出（trade=$TN，前面每笔成交都记进了 daily.counters）" || no "日常计数" "trade=$TN"
+CD=$(act "claim.daily" "{\"id\":\"$TID\"}")
+[ "$(echo "$CD" | jget data.result.ok)" = "true" ] && [ "$(echo "$CD" | jget data.result.reward)" = "$TPAY" ] \
+  && ok "claim.daily 按任务表发奖（$TID → 🪙$TPAY，与内容表同一份数字）" || no "claim.daily" "$CD"
+[ "$(echo "$CD" | jget "data.state.daily.claimed.$TID")" = "true" ] \
+  && ok "任务领取状态写进 daily.claimed（当天不能领第二遍）" || no "任务记账" "$CD"
+CDD=$(act "claim.daily" "{\"id\":\"$TID\"}")
+[ "$(echo "$CDD" | jget data.result.ok)" = "false" ] \
+  && ok "已领过的任务再点被拒" || no "任务重复领" "$CDD"
+CDN=$(act "claim.daily" '{"id":"nosuchTask"}')
+[ "$(echo "$CDN" | jget data.result.ok)" = "false" ] && echo "$CDN" | grep -q "任务未完成" \
+  && ok "表里没有的任务 id 走同一条拒绝（不发钱）" || no "任务假 id" "$CDN"
+
+ORD=$(act "state" | node -e '
+let s=(JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).state||{};
+let l=(s.orders||{}).list||[];
+let i=l.findIndex(o=>!o.done&&o.q===0&&o.grade!=="rare");
+if(i<0) i=l.findIndex(o=>!o.done);            // 当天只剩 rare 单时改验"品质不足"那条闸（同样是真状态）
+let o=l[i]||{};
+console.log(i<0?"":(i+" "+(o.id||"")+" "+(o.need||0)+" "+(o.pay||0)+" "+(o.q||0)));')
+if [ -n "$ORD" ]; then
+  OIDX=${ORD%% *}; REST=${ORD#* }; OIID=${REST%% *}; REST2=${REST#* }; ONEED=${REST2%% *}; REST3=${REST2#* }; OPAY=${REST3%% *}; OQ=${REST3##* }
+  OB=$(act "market.buy" "{\"id\":\"$OIID\",\"amt\":$ONEED}")
+  [ "$(echo "$OB" | jget data.result.ok)" = "true" ] \
+    && ok "凑齐商会订单要的量（$OIID ×$ONEED 从市场买齐）" || no "凑单材料" "$OB"
+  OF0=$(echo "$OB" | jget data.state.coins); REP0=$(echo "$OB" | jget data.state.rep)
+  OF=$(act "order.fulfill" "{\"index\":$OIDX}")
+  if [ "$OQ" = "0" ]; then
+    [ "$(echo "$OF" | jget data.result.ok)" = "true" ] && [ "$(echo "$OF" | jget data.result.pay)" = "$OPAY" ] \
+      && ok "order.fulfill 交得了货：按订单行的那个价 🪙$OPAY 结款" || no "order.fulfill" "$OF"
+    [ "$(echo "$OF" | jget "data.state.orders.list.$OIDX.done")" = "true" ] \
+      && ok "订单行本身被标 done（第 $OIDX 单），不是只在回执里说成功" || no "订单状态" "$OF"
+    [ "$(echo "$OF" | jget data.state.coins)" = "$((OF0 + OPAY))" ] && [ "$(echo "$OF" | jget data.state.rep)" = "$((REP0 + 1))" ] \
+      && ok "货款与声望都进整帧（🪙$OF0→$(echo "$OF" | jget data.state.coins)、rep $REP0→$(echo "$OF" | jget data.state.rep)）" || no "订单结算落帧" "$OF"
+    OFD=$(act "order.fulfill" "{\"index\":$OIDX}")
+    [ "$(echo "$OFD" | jget data.result.ok)" = "false" ] && echo "$OFD" | grep -q "订单已完成" \
+      && ok "同一单交第二次被拒（不会重复发货款）" || no "订单重复交" "$OFD"
+  else
+    [ "$(echo "$OF" | jget data.result.ok)" = "false" ] && echo "$OF" | grep -q "品质不足" \
+      && ok "rare 单只认 q≥1：市场上买的 q0 货交不了，货一件没少（当天没有普通单，正向那条由上一轮的 done 标记覆盖）" || no "rare 单品质闸" "$OF"
+    [ "$(echo "$OF" | jget "data.state.orders.list.$OIDX.done")" != "true" ] && [ "$(echo "$OF" | jget data.state.coins)" = "$OF0" ] \
+      && ok "被拒那一单既不结款也不翻 done" || no "rare 单拒绝副作用" "$OF"
+  fi
+else
+  no "商会订单正向覆盖" "orders.list 是空的（当天没滚出订单），order.fulfill 无从打起"
+fi
+OFN=$(act "order.fulfill" '{"index":77}')
+[ "$(echo "$OFN" | jget data.result.ok)" = "false" ] && echo "$OFN" | grep -q "订单不存在" \
+  && ok "越界订单号被拒" || no "订单越界" "$OFN"
+
+echo "== 意图覆盖面（H7）之五：挑战现场 / 沙盒现场 / 引导 / 演示发奖 / 重置 =="
+# 挑战与沙盒的临时台**不进存档**（EngineCtx 那份内存现场），它的整帧效果靠 data.bench / data.sandbox
+# 带外回传。这一段钉的就是"回传的那张台子真的跟着意图变"，以及"退出后存档一个字节都没被污染"。
+CS=$(act "challenge.start")
+[ "$(echo "$CS" | jget data.result.ok)" = "true" ] && [ -n "$(echo "$CS" | jget data.result.target)" ] \
+  && [ -n "$(echo "$CS" | jget data.state.chal.reactId)" ] \
+  && ok "challenge.start 起一局：目标物 $(echo "$CS" | jget data.result.target)、步数上限写进存档里的 chal 段" || no "challenge.start" "$CS"
+[ -n "$(echo "$CS" | jget data.bench)" ] && [ "$(echo "$CS" | jget data.bench.placed | node -e 'let d=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(Object.keys(d||{}).length)')" = "0" ] \
+  && ok "新挑战的回传现场是空台（bench 带外给出，玩家一进来就看得见它）" || no "挑战空现场" "$CS"
+CG=$(echo "$CS" | node -e '
+let c=((JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).state||{}).chal||{};
+let g=c.given||{}, k=Object.keys(g)[0]||"";
+console.log(k+" "+(g[k]||0)+" "+(Object.keys(c.decoys||{})[0]||""));')
+CGID=${CG%% *}; RESTC=${CG#* }; CGN=${RESTC%% *}; CGDECOY=${RESTC##* }
+CBAG0=$(echo "$CS" | jget "data.state.bag.$CGID|0"); CBAG0=${CBAG0:-0}
+CITEMS0=$(echo "$CS" | jlen data.state.bag)
+CP=$(act "bench.place" "{\"id\":\"$CGID\",\"n\":$CGN}")
+[ "$(echo "$CP" | jget data.result.ok)" = "true" ] && [ "$(echo "$CP" | jget "data.bench.placed.$CGID")" = "$CGN" ] \
+  && ok "挑战材料按服务端下发的那份上台（$CGID ×$CGN，走的是临时台不是玩家库存）" || no "挑战投放" "$CP"
+# 注意：jget 读不到的键输出的是空串，两边都要归一成 0 再比——不然"本来就没有这份材料"
+# 会被写成"背包从 0 变成了空"，一条本该成立的判据当场假红。
+CBAG1=$(echo "$CP" | jget "data.state.bag.$CGID|0"); CBAG1=${CBAG1:-0}
+[ "$CBAG1" = "$CBAG0" ] && [ "$(echo "$CP" | jlen data.state.bag)" = "$CITEMS0" ] \
+  && ok "投放不动背包（$CGID 仍是 $CBAG0 份、条目数 $CITEMS0 原样）：这局成败与玩家的存货无关" || no "挑战投放扣了库存" "$CBAG0/$CBAG1、$CITEMS0/$(echo "$CP" | jlen data.state.bag)"
+CQ=$(act "challenge.quit")
+[ "$(echo "$CQ" | jget data.result.ok)" = "true" ] && [ -z "$(echo "$CQ" | jget data.state.chal)" ] \
+  && [ -z "$(echo "$CQ" | jget data.bench)" ] && [ "$(echo "$CQ" | jget data.sandbox)" = "false" ] \
+  && ok "challenge.quit 把现场整个撤掉：存档里 chal 清空、回传现场不再带出" || no "challenge.quit" "$CQ"
+CQB=$(act "challenge.quit")
+[ "$(echo "$CQB" | jget data.result.ok)" = "true" ] \
+  && ok "没有挑战时退出也是一次安全的 no-op（幂等的收口，不该报错）" || no "空退出报错" "$CQB"
+
+SB0=$(echo "$CQ" | jget data.state.stats.sandbox); XBG0=$(echo "$CQ" | jget 'data.state.bag.H2O|0'); XBG0=${XBG0:-0}; XLV0=$(echo "$CQ" | jget data.state.level)
+SEN=$(act "sandbox.enter")
+[ "$(echo "$SEN" | jget data.result.ok)" = "true" ] && [ "$(echo "$SEN" | jget data.sandbox)" = "true" ] \
+  && [ -n "$(echo "$SEN" | jget data.bench)" ] \
+  && ok "sandbox.enter 开沙盒：sandbox=true 且带外回传一张空白试验台" || no "sandbox.enter" "$SEN"
+SBA0=$(echo "$SEN" | jget 'data.state.bag.H2|0')
+act "bench.place" '{"id":"H2","n":4}' >/dev/null
+SPB=$(act "bench.place" '{"id":"O2","n":2}')
+[ "$(echo "$SPB" | jget "data.bench.placed.O2")" = "2" ] && [ "$(echo "$SPB" | jget 'data.state.bag.H2|0')" = "$SBA0" ] \
+  && ok "沙盒里投放不扣库存（背包 H2 仍是 $SBA0，台面上却是 4/2）" || no "沙盒投放" "$SPB"
+SRE=$(act "react" '{"multiplier":2}')
+[ "$(echo "$SRE" | jget data.result.ok)" = "true" ] && [ "$(echo "$SRE" | jget data.state.stats.sandbox)" = "$((SB0 + 1))" ] \
+  && ok "沙盒反应计进 stats.sandbox（$SB0 → $(echo "$SRE" | jget data.state.stats.sandbox)）而不是成功实验数" || no "sandbox 计数" "$SRE"
+XBG1=$(echo "$SRE" | jget 'data.state.bag.H2O|0'); XBG1=${XBG1:-0}
+[ "$(echo "$SRE" | jget data.state.level)" = "$XLV0" ] && [ "$XBG1" = "$XBG0" ] \
+  && [ -z "$(echo "$SRE" | jget 'data.bench.placed.H2')" ] \
+  && ok "沙盒不给经验、不产物进包、台面清空（等级仍 $XLV0、背包的水仍 $XBG0 份，而这一把台面上投的是 4 H2 + 2 O2）：练手不会毁号" || no "沙盒无副作用" "$SRE"
+SEX=$(act "sandbox.exit")
+[ "$(echo "$SEX" | jget data.result.ok)" = "true" ] && [ "$(echo "$SEX" | jget data.sandbox)" = "false" ] \
+  && [ -z "$(echo "$SEX" | jget data.bench)" ] \
+  && ok "sandbox.exit 关掉沙盒并撤掉带外现场（存档 benchStates 一直是那张真台）" || no "sandbox.exit" "$SEX"
+
+TS3=$(act "settings" '{"tutorial":3}')
+[ "$(echo "$TS3" | jget data.state.tutorial)" = "3" ] && ok "把引导推到第 3 步（正向覆盖前先把起点摆正）" || no "settings tutorial" "$TS3"
+TCFG=$(getcfg tutorial_coins)
+TB0=$(echo "$TS3" | jget data.state.coins)
+TST=$(act "tutorial.step" '{"to":4}')
+[ "$(echo "$TST" | jget data.result.ok)" = "true" ] && [ "$(echo "$TST" | jget data.state.tutorial)" = "4" ] \
+  && ok "tutorial.step 只往前推：3 → 4" || no "tutorial.step" "$TST"
+[ "$(echo "$TST" | jget data.result.bonus)" = "$TCFG" ] && [ "$(echo "$TST" | jget data.state.coins)" = "$((TB0 + TCFG))" ] \
+  && ok "跨过第 3 那一步按配置发引导补贴（🪙$TCFG 进整帧，不是客户端自己加的）" || no "tutorial 补贴" "$TST 期望 $TCFG"
+TSTB=$(act "tutorial.step" '{"to":2}')
+[ "$(echo "$TSTB" | jget data.result.bonus)" = "0" ] && [ "$(echo "$TSTB" | jget data.state.tutorial)" = "4" ] \
+  && ok "引导步数不许回退（to=2 被吞，补贴也不会重发）" || no "tutorial 回退" "$TSTB"
+
+ADV=$(act "ad.status")
+KIND=$(echo "$ADV" | node -e '
+let v=((JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).result||{});
+let s=(v.slots||[]).filter(x=>x.ready===true&&x.kind!=="boom");
+let p=s.filter(x=>x.reward==="diamonds")[0]||s[0]||{};
+console.log((p.kind||"")+" "+(p.amount||0)+" "+(v.viewPoints||0)+" "+(v.points||0)+" "+(v.total||0)+" "+((v.devMode===true)?"dev":"nodev"));')
+KID=${KIND%% *}; RESTK=${KIND#* }; KAMT=${RESTK%% *}; RESTK2=${RESTK#* }; KVP=${RESTK2%% *}; RESTK3=${RESTK2#* }; KP0=${RESTK3%% *}; RESTK4=${RESTK3#* }; KT0=${RESTK4%% *}; KDEV=${RESTK4##* }
+KD0=$(echo "$ADV" | jget data.state.diamonds)
+if [ -z "$KID" ] || [ "$KDEV" != "dev" ]; then
+  no "ad.devGrant 正向覆盖" "本机没有空闲且可演示发放的广告位（kind=$KID devMode=$KDEV）——回调／签发／冷却那三面已由激励视频段覆盖"
+else
+  ADR=$(act "ad.request" "{\"kind\":\"$KID\"}")
+  TICK2=$(echo "$ADR" | jget data.result.ticket)
+  [ "$(echo "$ADR" | jget data.result.ok)" = "true" ] && [ -n "$TICK2" ] \
+    && ok "ad.request 为 $KID 位签发工单（回执带 devMode=true，本机演示通道在）" || no "ad.request $KID" "$ADR"
+  ADG=$(act "ad.devGrant" "{\"ticket\":\"$TICK2\"}")
+  [ "$(echo "$ADG" | jget data.result.ok)" = "true" ] \
+    && ok "ad.devGrant 把这张工单认成「已看完」：带玩家 JWT，归属查得出来" || no "ad.devGrant" "$ADG"
+  ADA=$(act "ad.devGrant" '{"ticket":"deadbeefdeadbeefdeadbeefdeadbeef"}')
+  [ "$(echo "$ADA" | jget data.result.ok)" = "false" ] && echo "$ADA" | grep -q "工单不存在\|不属于你" \
+    && ok "别人编出来的工单号不被承认（演示通道也认归属，不是谁都能白拿）" || no "devGrant 越权" "$ADA"
+  SFR=$(act "state")
+  # 结算在"取帧开头"：工单是 devGrant 之后**第一帧**兑进来的，type=ad 事件就带在那一帧上，
+  # 再往后的 SFR 只剩 ["state"]（余额是留着看的，事件不会补发）。所以事件这条判 ADA，
+  # 而"奖励进了存档、之后每帧都还在"判 SFR——两句话各钉各的，不混着说。
+  [ "$(echo "$SFR" | jget data.state.diamonds)" = "$((KD0 + KAMT))" ] \
+    && ok "奖励在下一帧开头结算入账并留在存档里：💎$KD0 → $(echo "$SFR" | jget data.state.diamonds)（正是工单上那个数）" || no "devGrant 结算" "$SFR 期望 +$KAMT"
+  [ "$(echo "$SFR" | jget data.state.ad.points)" = "$((KP0 + KVP))" ] && [ "$(echo "$SFR" | jget data.state.ad.total)" = "$((KT0 + 1))" ] \
+    && ok "积分与累计观看数同时进 ad 段（points $KP0→$(echo "$SFR" | jget data.state.ad.points)、total $KT0→$(echo "$SFR" | jget data.state.ad.total)）" || no "ad 积分" "$SFR"
+  [ "$(echo "$ADA" | node -e 'let e=((JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).events||[]);console.log(e.filter(x=>x.type==="ad").length)')" -ge 1 ] \
+    && ok "到账用 type=ad 事件告知客户端（带在结算那一帧，不等下一次取帧补发）" || no "ad 事件" "$ADA"
+fi
+
+FG=$(curl -s -X POST "$BASE/api/auth/guest"); FGT=$(echo "$FG" | jget data.token)
+FRM=$(curl -s "$BASE/api/game/state" -H "Authorization: Bearer $FGT")
+BEFORE=$(act "state" | jget data.revision)
+RS=$(act "reset")
+[ "$(echo "$RS" | jget data.result.ok)" = "true" ] && [ "$(echo "$RS" | jget data.state.level)" = "1" ] \
+  && [ "$(echo "$RS" | jget data.state.level)" = "$(echo "$FRM" | jget data.state.level)" ] \
+  && ok "reset 把存档就地覆盖成新手档（等级回到 1，与刚注册的游客同档）" || no "reset 等级" "$RS"
+[ "$(echo "$RS" | jget data.state.coins)" = "$(echo "$FRM" | jget data.state.coins)" ] \
+  && ok "余额回到 fresh 那份基线（与新建号一模一样：$(echo "$RS" | jget data.state.coins)）" || no "reset 余额" "$RS"
+[ "$(echo "$RS" | jget 'data.state.bag.H2|0')" = "$(echo "$FRM" | jget 'data.state.bag.H2|0')" ] \
+  && ok "背包也是重开的（H2 与新手档同量，不是把玩家攒的东西留着只扣数字）" || no "reset 背包" "$RS"
+[ "$(echo "$RS" | jlen data.state.rooms)" = "1" ] \
+  && [ "$(echo "$RS" | node -e 'let s=((JSON.parse(require("fs").readFileSync(0,"utf8")).data||{}).state||{});console.log(Object.keys(s.vessels||{}).filter(k=>(s.vessels[k]||{}).owned===true).length+"/"+Object.keys(s.equipment||{}).filter(k=>s.equipment[k]===true).length)')" = "3/1" ] \
+  && ok "房间 / 容器 / 设备一并回零（rooms 2→1、容器只剩自带 3 件、设备只剩酒精灯）" || no "reset 解锁面" "$RS"
+[ "$(echo "$RS" | jget data.state.sign.streak)" = "0" ] && [ "$(echo "$RS" | jget data.state.tutorial)" = "0" ] \
+  && [ -z "$(echo "$RS" | jget data.state.chal)" ] && [ "$(echo "$RS" | jget data.sandbox)" = "false" ] \
+  && ok "签到 / 引导 / 现场三段同时清干净（streak 0、tutorial 0、chal 空、sandbox false）" || no "reset 清现场" "$RS"
+[ "$(echo "$RS" | jget data.revision)" -gt "$BEFORE" ] \
+  && ok "重置不是抹掉存档而是照常写回一版（revision $BEFORE → $(echo "$RS" | jget data.revision)：历史里查得到这次重置）" || no "reset revision" "$RS"
+[ "$(act "state" | jget data.state.coins)" = "$(echo "$RS" | jget data.state.coins)" ] \
+  && ok "重开的那一帧就是库里那一帧（再取一次余额一致，不是只改了内存）" || no "reset 落库" ""
+
+echo "== 本轮账号自清（回归不该一轮一轮给后台攒测试号） =="
+# 脚本每跑一轮就建四五个玩家（注册档、游客档、TapTap 档），以前全留在 app_user 里：
+# 后台【用户管理】与看板的 totalUsers 因此越看越假。这里只删**本轮自己解析得出来**的那些——
+# 按令牌反查 /api/me 的用户名、再按用户名精确匹配 uid，绝不用 q= 模糊搜一把梭（会连别轮的号一起扫掉）。
+h7me(){ curl -s "$BASE/api/me" -H "Authorization: Bearer $1" | jget data.user; }
+# 游客名是中文（游客3077ed89）。中文只要经过 curl 的命令行参数，就要先过 Windows 的 ANSI 代码页：
+# 拼进 URL 会被 Tomcat 判成非法请求（400），走 --data-urlencode 也一样——它编码的是 curl 已经收
+# 到下的 GBK 字节，服务端按 UTF-8 比对，查出来"无人"。看着像令牌没解出账号，其实是根本没查对字。
+# 所以这一步挪进 node：名字从<b>文件</b>读（bash 写进去的是原样 UTF-8），curl 全程只见 ASCII 百分号串。
+H7QF=$(mktemp)
+h7uid(){
+  printf '%s' "$1" > "$H7QF"
+  local Q
+  Q=$(node -e 'let fs=require("fs");process.stdout.write(encodeURIComponent(fs.readFileSync(process.argv[1],"utf8")))' "$H7QF")
+  curl -s "$BASE/admin/api/users?q=$Q&size=20" -H "$AH" | node -e '
+let fs=require("fs");let want=fs.readFileSync(process.argv[1],"utf8");
+let d=JSON.parse(require("fs").readFileSync(0,"utf8")).data.rows||[];
+let r=d.filter(x=>x.username===want)[0];console.log(r?r.id:"")' "$H7QF"
+}
+NAMES=""
+# 令牌 → 用户名 → uid。少收一支令牌，就少清一个档：GAT（举报人那位的临时游客档）以前不在
+# 这张单子里，每跑一轮后台就多留一个"没人认领的游客"，台账判据（末尾 USERS_END ≤ USERS0）
+# 就是这么被一点点顶红的。GBT 不在这儿，不是漏——它那一档在删号组里已经被当场删掉了。
+for TK in "$T" "$UT" "$GT" "$GGT" "$XGT" "$BGT" "$FGT" "$GAT"; do
+  N=$(h7me "$TK"); [ -n "$N" ] && NAMES="$NAMES $N"
+done
+for N in "$U" "$NICK" "$PU" "$GU" "$(echo "$T1" | jget data.user)" "$(echo "$BIND" | jget data.user)"; do
+  [ -n "$N" ] && NAMES="$NAMES $N"
+done
+# 手工排查时留下的探针档（不在本脚本里，是这一轮 H7 调试建的），按前缀精确认领。
+PROBES=$(curl -s "$BASE/admin/api/users?q=probe&size=50" -H "$AH" | node -e '
+let d=JSON.parse(require("fs").readFileSync(0,"utf8")).data.rows||[];
+console.log(d.filter(x=>/^(lv)?probe/.test(x.username||"")).map(x=>x.username).join(" "));')
+PURGED=0
+for N in $(echo "$NAMES" | tr ' ' '\n' | grep -v '^$' | sort -u); do
+  UIDX=$(h7uid "$N")
+  if [ -z "$UIDX" ]; then no "自清找不到档（$N）" "按用户名精确匹配不到，说明这一位的令牌没解出本轮账号"; continue; fi
+  DEL=$(curl -s -X DELETE "$BASE/admin/api/users?id=$UIDX" -H "$AH")
+  [ "$(echo "$DEL" | jget ok)" = "true" ] || { no "删号失败（$N id=$UIDX）" "$DEL"; continue; }
+  [ -z "$(h7uid "$N")" ] && [ "$(curl -s "$BASE/admin/api/users/save?id=$UIDX" -H "$AH" | jget code)" = "404" ] \
+    && { ok "收回本轮账号 $N（uid=$UIDX，逐表清干净后列表与存档都查无此人）"; PURGED=$((PURGED + 1)); } \
+    || no "删号后仍查得到（$N）" "uid=$UIDX"
+done
+for N in $PROBES; do
+  UIDX=$(h7uid "$N"); [ -z "$UIDX" ] && continue
+  curl -s -X DELETE "$BASE/admin/api/users?id=$UIDX" -H "$AH" >/dev/null
+  [ -z "$(h7uid "$N")" ] && ok "顺手清掉排查时手工建的探针档 $N（uid=$UIDX）" || no "探针档没清掉" "$N"
+  PURGED=$((PURGED + 1))
+done
+USERS_END=$(curl -s "$BASE/admin/api/users?size=1" -H "$AH" | jget data.total)
+if [ -z "$USERS_END" ]; then
+  no "账号台账读不出来" "total 是空的（基线 $USERS0），这条判据没法成立"
+elif [ "$USERS_END" -le "$USERS0" ]; then
+  ok "台账不涨：app_user $USERS0 → $USERS_END（本轮收回 $PURGED 个$( [ "$USERS_END" -lt "$USERS0" ] && echo "，比基线还少是因为顺手清了历史遗留" )）"
+else
+  no "账号台账净增 $((USERS_END - USERS0))" "$USERS0 → $USERS_END，本轮收回 $PURGED 个：有账号没被认领回去"
+fi
+DEADCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/game/state" -H "Authorization: Bearer $T")
+[ "$DEADCODE" = "401" ] && ok "被删那位手上的令牌当场失效（会话随行撤销，脚本自己也不再留着可用身份）" || no "删号后令牌还活着" "http=$DEADCODE"
 
 echo
 echo "================  E2E 结果： PASS=$PASS  FAIL=$FAIL  ================"
