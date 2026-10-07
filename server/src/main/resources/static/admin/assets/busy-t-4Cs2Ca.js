@@ -1,0 +1,1 @@
+import{x as a}from"./index-BVJ8buIi.js";const t=a({});function e(){const u=n=>!!t[n];async function s(n,i){if(t[n])return t[n];const r=(async()=>{try{return await i()}finally{delete t[n]}})();return t[n]=r,r}return{busy:u,run:s}}export{e as u};

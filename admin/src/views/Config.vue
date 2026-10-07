@@ -2,11 +2,11 @@
   <div>
     <div class="bar">
       <el-input v-model="newKey" placeholder="新增配置键（如 daily_gift_coins）" style="width:240px" />
-      <el-button v-if="auth.canWrite" @click="addNew">＋ 新增配置</el-button>
+      <el-button v-if="auth.canWrite" :loading="busy('addKey')" @click="addNew">＋ 新增配置</el-button>
       <!-- 搜索是服务端做的（H6-3）：整表已经不再一次搬进浏览器，只拿当前页的话搜不到没在这一页的键 -->
       <el-input v-model="q" placeholder="按键名 / 分类 / 备注搜索" style="width:220px"
                 clearable @keyup.enter="search" @clear="search" />
-      <el-button @click="search">搜索</el-button>
+      <el-button :loading="busy('list')" @click="search">搜索</el-button>
       <div style="flex:1"></div>
       <span class="tip">「生效范围」与编辑器形态都由服务端引擎实际读取的那份说明书（ConfigSpec）下发：标着「仅前端」「已退役」的键，改了不会改变任何人的结算</span>
     </div>
@@ -50,7 +50,7 @@
       <el-table-column label="操作" width="96">
         <template #default="s">
           <el-button link type="primary" @click="edit(s.row)">编辑</el-button>
-          <el-button v-if="auth.canWrite" link type="danger" @click="del(s.row)">删除</el-button>
+          <el-button v-if="auth.canWrite" link type="danger" :loading="busy('del:' + s.row.cfgKey)" @click="del(s.row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -338,7 +338,7 @@
 
       <template #footer>
         <el-button @click="dlg=false">取消</el-button>
-        <el-button v-if="auth.canWrite" type="primary" @click="save">保存并下发</el-button>
+        <el-button v-if="auth.canWrite" type="primary" :loading="busy('save')" @click="save">保存并下发</el-button>
       </template>
     </el-dialog>
   </div>
@@ -348,10 +348,13 @@
 import { computed, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http, { isConflict } from "../api";
+import { useBusy } from "../busy";
 import { askReloadOnConflict, explainConflict } from "../conflict";
 import { useAuth } from "../store";
 
 const auth = useAuth();
+/* 防连点（H6-4）：配置键的保存是覆盖写，第二次点会把第一次那次也重放一遍——按动作 + 键名记在途。 */
+const { busy, run } = useBusy();
 const rows = ref([]);
 const loading = ref(false);
 const newKey = ref("");
@@ -445,11 +448,13 @@ async function loadCompSchema() {
   catch (e) { /* 同上：拿不到说明书时占位符留空，边界判断依旧只在服务端 */ }
 }
 async function load() {
-  loading.value = true;
-  try {
-    const d = await http.get("/config", { params: { q: q.value, size, off: (page.value - 1) * size } });
-    rows.value = d.rows; total.value = d.total;
-  } finally { loading.value = false; }
+  await run("list", async () => {
+    loading.value = true;
+    try {
+      const d = await http.get("/config", { params: { q: q.value, size, off: (page.value - 1) * size } });
+      rows.value = d.rows; total.value = d.total;
+    } finally { loading.value = false; }
+  });
 }
 /** 换了搜索词就回第 1 页：停在第 4 页筛一个只有两行结果的关键词，面板会显示一张空表。 */
 function search() { page.value = 1; load(); }
@@ -569,17 +574,19 @@ function cloneDeep(o) {
 }
 async function addNew() {
   if (!newKey.value) return ElMessage.error("请输入键名");
-  // 同键 PUT 是覆盖：新增框只该用来开新键，已有键请回到那一行编辑，
-  // 否则一次手滑就把线上值和备注一起换掉了。
-  const hit = await findRow(newKey.value);
-  if (hit)
-    return ElMessage.warning(`${newKey.value} 已经在库里，请直接编辑那一行（新增同名会覆盖它当前的值）`);
-  cur.value = newKey.value;
-  saveErr.value = [];
-  stamp.value = ""; stampBy.value = "";   // 新增：没有"上一版"，保存时走「这行还不该存在」
-  meta.value = { category: "general", remark: "" };
-  jsonText.value = "0"; val.value = null;
-  dlg.value = true;
+  await run("addKey", async () => {
+    // 同键 PUT 是覆盖：新增框只该用来开新键，已有键请回到那一行编辑，
+    // 否则一次手滑就把线上值和备注一起换掉了。
+    const hit = await findRow(newKey.value);
+    if (hit)
+      return ElMessage.warning(`${newKey.value} 已经在库里，请直接编辑那一行（新增同名会覆盖它当前的值）`);
+    cur.value = newKey.value;
+    saveErr.value = [];
+    stamp.value = ""; stampBy.value = "";   // 新增：没有"上一版"，保存时走「这行还不该存在」
+    meta.value = { category: "general", remark: "" };
+    jsonText.value = "0"; val.value = null;
+    dlg.value = true;
+  });
 }
 function addLab() {
   let key = "custom"; let i = 1;
@@ -601,31 +608,33 @@ async function save() {
   let v;
   try { v = currentValue(); } catch (e) { return ElMessage.error(e.message); }
   saveErr.value = [];
-  try {
-    await http.put("/config",
-      { key: cur.value, value: v, category: meta.value.category || "general", remark: meta.value.remark || null },
-      // expect：手上这一版的版本号（空串=新增，服务端按「这个键还不该存在」判）
-      { params: { expect: stamp.value || "none" } });
-  } catch (e) {
-    // 冲突不是"值填坏了"，摊进 saveErr 只会让人以为改改数字就能存——它要的是另一条出路
-    if (isConflict(e)) {
-      if (await askReloadOnConflict(e, stamp.value
-        ? "「载入最新」会把你这份没保存的改动换成别人那一版；想留着它就先别关这个弹窗。"
-        : "这个键在你填表期间被别人建出来了。选「载入最新」会打开他那一行让你接着改，你原来那份不会落库。"))
-        await reopenWith(cur.value);
+  await run("save", async () => {
+    try {
+      await http.put("/config",
+        { key: cur.value, value: v, category: meta.value.category || "general", remark: meta.value.remark || null },
+        // expect：手上这一版的版本号（空串=新增，服务端按「这个键还不该存在」判）
+        { params: { expect: stamp.value || "none" } });
+    } catch (e) {
+      // 冲突不是"值填坏了"，摊进 saveErr 只会让人以为改改数字就能存——它要的是另一条出路
+      if (isConflict(e)) {
+        if (await askReloadOnConflict(e, stamp.value
+          ? "「载入最新」会把你这份没保存的改动换成别人那一版；想留着它就先别关这个弹窗。"
+          : "这个键在你填表期间被别人建出来了。选「载入最新」会打开他那一行让你接着改，你原来那份不会落库。"))
+          await reopenWith(cur.value);
+        return;
+      }
+      // 类型化表单（广告目录 / 合规 / 版本门）一处写错常常连带好几行都有毛病，toast 装不下；
+      // 把服务端校验器的原话按条摊开显示在表单里——它比任何前端提示都更清楚这一行为什么不能存。
+      // 兜底 JSON 编辑保持只有 toast：那是人手工写的自由文本，报错本来就只有一句。
+      if (kind.value !== "json")
+        saveErr.value = String((e && e.msg) || "保存失败").split("；").filter(Boolean);
       return;
     }
-    // 类型化表单（广告目录 / 合规 / 版本门）一处写错常常连带好几行都有毛病，toast 装不下；
-    // 把服务端校验器的原话按条摊开显示在表单里——它比任何前端提示都更清楚这一行为什么不能存。
-    // 兜底 JSON 编辑保持只有 toast：那是人手工写的自由文本，报错本来就只有一句。
-    if (kind.value !== "json")
-      saveErr.value = String((e && e.msg) || "保存失败").split("；").filter(Boolean);
-    return;
-  }
-  ElMessage.success("已保存并下发"); dlg.value = false; newKey.value = "";
-  // 新建的键按 category,cfg_key 排在它该在的那一页；留着上一次的搜索词，人就会以为没建出来。
-  if (!stamp.value) { q.value = ""; page.value = 1; }
-  load();
+    ElMessage.success("已保存并下发"); dlg.value = false; newKey.value = "";
+    // 新建的键按 category,cfg_key 排在它该在的那一页；留着上一次的搜索词，人就会以为没建出来。
+    if (!stamp.value) { q.value = ""; page.value = 1; }
+    load();
+  });
 }
 
 /** 冲突之后唯一有用的动作：拿当前生效那一版重开表单（不拿旧草稿去覆盖）。 */
@@ -642,16 +651,18 @@ async function reopenWith(key) {
 }
 
 async function del(row) {
-  await ElMessageBox.confirm(`删除配置 ${row.cfgKey}？删除后客户端将回退到代码内置默认值。`, "提示", { type: "warning" });
-  try {
-    await http.delete("/config", { params: { key: row.cfgKey, expect: row.updatedAt || "none" } });
-    ElMessage.success("已删除");
-  } catch (e) {
-    await explainConflict(e);   // 删除没有草稿要保：说清是谁改的，刷回真相
-  }
-  // 删掉的是本页最后一条时退一页，否则会停在一张开着的空表上（总数由服务端给，页码不会自己退）
-  if (rows.value.length === 1 && page.value > 1) page.value--;
-  load();
+  await run("del:" + row.cfgKey, async () => {
+    await ElMessageBox.confirm(`删除配置 ${row.cfgKey}？删除后客户端将回退到代码内置默认值。`, "提示", { type: "warning" });
+    try {
+      await http.delete("/config", { params: { key: row.cfgKey, expect: row.updatedAt || "none" } });
+      ElMessage.success("已删除");
+    } catch (e) {
+      await explainConflict(e);   // 删除没有草稿要保：说清是谁改的，刷回真相
+    }
+    // 删掉的是本页最后一条时退一页，否则会停在一张开着的空表上（总数由服务端给，页码不会自己退）
+    if (rows.value.length === 1 && page.value > 1) page.value--;
+    load();
+  });
 }
 </script>
 

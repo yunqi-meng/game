@@ -48,6 +48,23 @@ public class AdminContentController {
     public ApiResponse<List<String>> types() { return ApiResponse.ok(content.types()); }
 
     /**
+     * 内容版本号（单值）：后台【内容】的体检卡片要的就是这一个数字，以前它为这一格数字去拉整份
+     * {@code /dashboard/overview}（十几条聚合 SQL 加上各模块的计数），问一次的成本比它自己有用得多。
+     *
+     * <p>来源是 {@link ContentService#contentVersion()}（带 1 秒缓存的那份读数），不是 {@code content.version()}：
+     * 同一进程里面板可能连开几次，而版本号本来就是分钟级的人工动作。返回的形状刻意只有这一个键。
+     *
+     * <p>权限与本控制器其余读接口一致：{@code AdminInterceptor} 认角色，读不挡 viewer（写才走
+     * {@code support.requireWriter}）。
+     */
+    @GetMapping("/version")
+    public ApiResponse<Map<String, Object>> version() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("contentVersion", contentService.contentVersion());
+        return ApiResponse.ok(out);
+    }
+
+    /**
      * 内容列表：{@code {rows,total}} 是后台分页列表的统一形状（见 {@link Page}），
      * {@code total} 是"这个筛选条件下库里有几行"，与本页挑了几行无关。
      */

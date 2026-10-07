@@ -9,7 +9,7 @@
             <el-option label="已处理" value="handled" />
             <el-option label="已驳回" value="dismissed" />
           </el-select>
-          <el-button @click="reloadReports">刷新</el-button>
+          <el-button :loading="busy('reports')" @click="reloadReports">刷新</el-button>
         </div>
         <el-table :data="reports" border height="calc(100vh - 260px)">
           <el-table-column prop="id" label="ID" width="70" />
@@ -24,8 +24,10 @@
           <el-table-column label="操作" width="180">
             <template #default="s">
               <template v-if="auth.canWrite && s.row.status === 'open'">
-                <el-button link type="success" @click="handle(s.row,'handled')">处理</el-button>
-                <el-button link type="info" @click="handle(s.row,'dismissed')">驳回</el-button>
+                <el-button link type="success" :loading="busy('handle:' + s.row.id)"
+                           :disabled="busy('dismiss:' + s.row.id)" @click="handle(s.row,'handled')">处理</el-button>
+                <el-button link type="info" :loading="busy('dismiss:' + s.row.id)"
+                           :disabled="busy('handle:' + s.row.id)" @click="handle(s.row,'dismissed')">驳回</el-button>
               </template>
               <span v-else-if="s.row.handledBy" class="dim">by {{ s.row.handledBy }}</span>
             </template>
@@ -44,7 +46,7 @@
             <el-option :value="1" label="1 · 提示（放行）" />
             <el-option :value="2" label="2 · 拦截" />
           </el-select>
-          <el-button v-if="auth.canWrite" type="primary" @click="addWord">添加</el-button>
+          <el-button v-if="auth.canWrite" type="primary" :loading="busy('addWord')" @click="addWord">添加</el-button>
           <span class="dim">只有 2（拦截）真的会让注册/改昵称被拒</span>
         </div>
         <el-table :data="words" border height="calc(100vh - 300px)">
@@ -54,14 +56,14 @@
             <template #default="s">{{ Number(s.row.level) >= 2 ? "2 · 拦截" : "1 · 提示" }}</template>
           </el-table-column>
           <el-table-column v-if="auth.canWrite" label="操作" width="100">
-            <template #default="s"><el-button link type="danger" @click="delWord(s.row)">删除</el-button></template>
+            <template #default="s"><el-button link type="danger" :loading="busy('delWord:' + s.row.id)" @click="delWord(s.row)">删除</el-button></template>
           </el-table-column>
         </el-table>
         <el-pagination background layout="prev, pager, next, total" :total="wTotal" :page-size="size" :current-page="wPage" @current-change="onWPage" />
       </el-tab-pane>
 
       <el-tab-pane label="操作日志" name="audit">
-        <div class="bar"><el-button @click="reloadAudit">刷新</el-button></div>
+        <div class="bar"><el-button :loading="busy('audit')" @click="reloadAudit">刷新</el-button></div>
         <el-table :data="audit" border height="calc(100vh - 300px)">
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column prop="admin" label="管理员" width="130" />
@@ -83,9 +85,12 @@
 import { onMounted, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http from "../api";
+import { useBusy } from "../busy";
 import { useAuth } from "../store";
 
 const auth = useAuth();
+/* 防连点（H6-4）：处理/驳回是同一行的两个互斥动作，所以按 动作+工单号 各记一个在途标记。 */
+const { busy, run } = useBusy();
 const tab = ref("reports");
 const size = 50;
 
@@ -105,41 +110,53 @@ watch(tab, function (t) { if (t === "words") reloadWords(); if (t === "audit") r
   现在服务端把 COUNT(*) 一起回过来，这里就只是转手。
 */
 async function reloadReports() {
-  const d = await http.get("/moderation/reports", { params: { status: rStatus.value, size, off: (rPage.value - 1) * size } });
-  reports.value = d.rows; rTotal.value = d.total;
+  await run("reports", async () => {
+    const d = await http.get("/moderation/reports", { params: { status: rStatus.value, size, off: (rPage.value - 1) * size } });
+    reports.value = d.rows; rTotal.value = d.total;
+  });
 }
 /** 换筛选条件要回到第 1 页：第 3 页的人筛"已处理"，若页数本来就掉到 1，他会停在一个空列表上。 */
 function filterReports() { rPage.value = 1; reloadReports(); }
 function onRPage(p) { rPage.value = p; reloadReports(); }
 
 async function handle(row, status) {
-  await http.post("/moderation/reports/handle", null, { params: { id: row.id, status } });
-  ElMessage.success("已更新"); reloadReports();
+  await run((status === "handled" ? "handle:" : "dismiss:") + row.id, async () => {
+    await http.post("/moderation/reports/handle", null, { params: { id: row.id, status } });
+    ElMessage.success("已更新"); reloadReports();
+  });
 }
 
 async function reloadWords() {
-  const d = await http.get("/moderation/words", { params: { size, off: (wPage.value - 1) * size } });
-  words.value = d.rows; wTotal.value = d.total;
+  await run("words", async () => {
+    const d = await http.get("/moderation/words", { params: { size, off: (wPage.value - 1) * size } });
+    words.value = d.rows; wTotal.value = d.total;
+  });
 }
 function onWPage(p) { wPage.value = p; reloadWords(); }
 async function addWord() {
   if (!wForm.value.word.trim()) return ElMessage.warning("请输入词语");
-  await http.post("/moderation/words", { word: wForm.value.word.trim(), level: wForm.value.level });
-  wForm.value.word = ""; ElMessage.success("已添加");
-  // 词表按 id 倒序（新的在第一页）：加完词停在原来那一页，人就看不到自己刚加的那条，以为没存进去
-  wPage.value = 1; reloadWords();
+  await run("addWord", async () => {
+    await http.post("/moderation/words", { word: wForm.value.word.trim(), level: wForm.value.level });
+    wForm.value.word = ""; ElMessage.success("已添加");
+    // 词表按 id 倒序（新的在第一页）：加完词停在原来那一页，人就看不到自己刚加的那条，以为没存进去
+    wPage.value = 1; reloadWords();
+  });
 }
 async function delWord(row) {
-  await ElMessageBox.confirm(`删除敏感词「${row.word}」？`, "确认");
-  await http.delete("/moderation/words", { params: { id: row.id } }); ElMessage.success("已删除");
-  // 删掉本页最后一条时往前退一页，否则会停在一张空表上（总数是服务端给的，页码还在原地）
-  if (words.value.length === 1 && wPage.value > 1) wPage.value--;
-  reloadWords();
+  await run("delWord:" + row.id, async () => {
+    await ElMessageBox.confirm(`删除敏感词「${row.word}」？`, "确认");
+    await http.delete("/moderation/words", { params: { id: row.id } }); ElMessage.success("已删除");
+    // 删掉本页最后一条时往前退一页，否则会停在一张空表上（总数是服务端给的，页码还在原地）
+    if (words.value.length === 1 && wPage.value > 1) wPage.value--;
+    reloadWords();
+  });
 }
 
 async function reloadAudit() {
-  const d = await http.get("/moderation/audit", { params: { size, off: (aPage.value - 1) * size } });
-  audit.value = d.rows; aTotal.value = d.total;
+  await run("audit", async () => {
+    const d = await http.get("/moderation/audit", { params: { size, off: (aPage.value - 1) * size } });
+    audit.value = d.rows; aTotal.value = d.total;
+  });
 }
 function onAPage(p) { aPage.value = p; reloadAudit(); }
 

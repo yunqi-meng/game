@@ -5,12 +5,14 @@
         <el-option v-for="t in types" :key="t" :label="t" :value="t" />
       </el-select>
       <el-input v-model="q" placeholder="搜索名称/ID" style="width:220px" @keyup.enter="reload" clearable />
-      <el-button @click="reload">查询</el-button>
+      <el-button :loading="busy('list')" @click="reload">查询</el-button>
       <el-button v-if="auth.canWrite" @click="openNew">＋ 新增</el-button>
       <el-button @click="goHealth">内容体检</el-button>
       <div style="flex:1"></div>
-      <el-tag>v{{ version }}</el-tag>
-      <el-button v-if="auth.canWrite" type="primary" @click="publish">发布（刷新客户端缓存）</el-button>
+      <!-- 内容版本只是"现在下发的是哪一版"这一个数（H6-6）：
+           以前这里挂一个【发布】按钮，可服务端每一次写入自己就把版本顶上去并失效缓存，
+           那个按钮点出来的效果和保存完全一样——多余的动作比没有动作更容易让人误判。 -->
+      <el-tag v-if="version != null">v{{ version }}</el-tag>
     </div>
 
     <el-table :data="rows" border v-loading="loading" height="calc(100vh - 190px)">
@@ -28,10 +30,12 @@
       </el-table-column>
       <el-table-column label="操作" width="270">
         <template #default="s">
-          <el-button link type="primary" @click="openEdit(s.row)">编辑</el-button>
-          <el-button link @click="openHistory(s.row)">历史</el-button>
-          <el-button v-if="auth.canWrite" link @click="toggle(s.row)">{{ s.row.enabled ? '停用' : '启用' }}</el-button>
-          <el-button v-if="auth.canWrite" link type="danger" @click="del(s.row)">删除</el-button>
+          <el-button link type="primary" :loading="busy('edit:' + s.row.itemId)" @click="openEdit(s.row)">编辑</el-button>
+          <el-button link :loading="busy('hist:' + s.row.itemId)" @click="openHistory(s.row)">历史</el-button>
+          <el-button v-if="auth.canWrite" link :loading="busy('toggle:' + s.row.itemId)"
+                     @click="toggle(s.row)">{{ s.row.enabled ? '停用' : '启用' }}</el-button>
+          <el-button v-if="auth.canWrite" link type="danger" :loading="busy('del:' + s.row.itemId)"
+                     @click="del(s.row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -61,7 +65,8 @@
         <el-table-column prop="name" label="当时的名称" show-overflow-tooltip />
         <el-table-column label="" width="80">
           <template #default="s">
-            <el-button v-if="auth.canWrite" link type="primary" @click="rollback(s.row)">回滚</el-button>
+            <el-button v-if="auth.canWrite" link type="primary" :loading="busy('rollback:' + s.row.id)"
+              @click="rollback(s.row)">回滚</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -108,17 +113,18 @@
 
       <template #footer>
         <el-button @click="dlg=false">取消</el-button>
-        <el-button v-if="auth.canWrite" type="primary" :loading="saving" @click="save">保存</el-button>
+        <el-button v-if="auth.canWrite" type="primary" :loading="busy('save')" @click="save">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http from "../api";
+import { useBusy } from "../busy";
 import { askReloadOnConflict, explainConflict } from "../conflict";
 import { useAuth } from "../store";
 import SchemaField from "../components/SchemaField.vue";
@@ -126,6 +132,9 @@ import SchemaField from "../components/SchemaField.vue";
 const router = useRouter();
 const route = useRoute();
 const auth = useAuth();
+/* 防连点（H6-4）：启停/删除/回滚这类"再点一次就反了"的动作各带一个在途标记，键里带上那一行的 ID，
+   所以 A 行在途不影响 B 行——见 ../busy.js。 */
+const { busy, run } = useBusy();
 
 const types = ref([]);
 const type = ref("reaction");
@@ -135,7 +144,8 @@ const total = ref(0);
 const page = ref(1);
 const size = 50;
 const loading = ref(false);
-const version = ref(0);
+/** 现在下发的是哪一版；拿不到就整个不显示（宁缺毋假，H6-6）。 */
+const version = ref(null);
 
 // schema：{ type: [Field] }；options：{ refs, enums }
 const allFields = ref({});
@@ -148,7 +158,6 @@ const model = ref({});          // 表单绑定的数据对象（含 id）
 const idInput = ref("");        // 新增时的业务 ID
 const curId = ref("");          // 编辑时的只读 ID
 const editing = ref(false);
-const saving = ref(false);
 const meta = ref({ name: "", sort: 0, enabled: 1 });
 /**
  * 乐观锁的版本号（H6-2）：这一行最后改动的时间戳，来自列表接口回传的 updatedAt，
@@ -175,35 +184,64 @@ onMounted(async () => {
   options.value = opt;
   types.value = await http.get("/content/types");
   if (types.value.length && !types.value.includes(type.value)) type.value = types.value[0];
-  if (route.query.type && types.value.includes(route.query.type)) type.value = route.query.type;
   await reload();
-  version.value = (await http.get("/dashboard/overview")).contentVersion;
-  if (route.query.id) {
-    const row = rows.value.find(r => r.itemId === route.query.id);
-    if (row) openEdit(row);
-  }
+  refreshVersion();
+  await locate(route.query);
 });
+
+/* 体检页那句【定位】是把 type/id 塞进 query 再跳到 /content（H6-6）。
+   以前这份 query 只在 onMounted 读一次：人已经停在 /content 时点【定位】，路由变了、
+   组件却是复用的那一个，mounted 不会再跑第二遍，于是"改完回去看一眼"这条路的最后一跳什么都不做。
+   现在盯着 query 本身：每次带着新的 type/id 进来都照着走一遍。 */
+watch(() => route.query, (qq) => { locate(qq); });
+
+async function locate(qq) {
+  if (!qq) return;
+  if (qq.type && types.value.includes(qq.type) && qq.type !== type.value) {
+    type.value = qq.type;
+    await reload();
+  }
+  if (!qq.id) return;
+  const row = rows.value.find(r => r.itemId === qq.id);
+  if (row) await openEdit(row);
+  else ElMessage.info(`当前这一页里没有 ${qq.id}（可能不在这一页），请按 ID 查询后再编辑`);
+}
 
 function onTypeChange() { reload(); }
 async function reload() {
-  loading.value = true;
+  await run("list", async () => {
+    loading.value = true;
+    try {
+      const d = await http.get("/content/items", { params: { type: type.value, q: q.value, size, off: (page.value - 1) * size } });
+      rows.value = d.rows; total.value = d.total;
+    } finally { loading.value = false; }
+  });
+}
+/**
+ * 内容版本号（H6-6）：这一个数以前是把整张看板的聚合查询（/dashboard/overview 要算 DAU、
+ * 近 7 日事件分布）拉回来只为了读它的 contentVersion 字段。现在走 /content/version 那个轻接口，
+ * 拿不到就什么都不显示——绝不许"退化回去拉 overview"，那样这条改动等于没做，只是多了一条隐蔽路径。
+ */
+async function refreshVersion() {
   try {
-    const d = await http.get("/content/items", { params: { type: type.value, q: q.value, size, off: (page.value - 1) * size } });
-    rows.value = d.rows; total.value = d.total;
-  } finally { loading.value = false; }
+    const d = await http.get("/content/version", { silent: true });
+    version.value = d && d.contentVersion != null ? d.contentVersion : null;
+  } catch (e) { version.value = null; }
 }
 function onPage(p) { page.value = p; reload(); }
 function goHealth() { router.push("/health"); }
 
 async function openEdit(row) {
-  editing.value = true; curId.value = row.itemId; idInput.value = "";
-  // 版本号取列表那一行的 updatedAt：它由库的 ON UPDATE 盖章，所以我们抄回来的就是服务端认的那一份
-  stamp.value = row.updatedAt || ""; stampBy.value = row.updatedBy || "";
-  const data = await http.get("/content/item", { params: { type: type.value, id: row.itemId } });
-  model.value = (data && typeof data === "object") ? data : {};
-  meta.value = { name: row.name || "", sort: row.sort || 0, enabled: row.enabled ? 1 : 0 };
-  tab.value = "form"; jsonText.value = "";
-  dlg.value = true;
+  await run("edit:" + row.itemId, async () => {
+    editing.value = true; curId.value = row.itemId; idInput.value = "";
+    // 版本号取列表那一行的 updatedAt：它由库的 ON UPDATE 盖章，所以我们抄回来的就是服务端认的那一份
+    stamp.value = row.updatedAt || ""; stampBy.value = row.updatedBy || "";
+    const data = await http.get("/content/item", { params: { type: type.value, id: row.itemId } });
+    model.value = (data && typeof data === "object") ? data : {};
+    meta.value = { name: row.name || "", sort: row.sort || 0, enabled: row.enabled ? 1 : 0 };
+    tab.value = "form"; jsonText.value = "";
+    dlg.value = true;
+  });
 }
 function openNew() {
   editing.value = false; curId.value = ""; idInput.value = "";
@@ -262,18 +300,19 @@ async function save() {
     sort: meta.value.sort ?? 0,
     enabled: meta.value.enabled ?? 1,
   };
-  saving.value = true;
-  try {
-    // expect：把打开对话框那一刻的版本号带回去（空串=新增，服务端按「这行还不该存在」判）
-    await http.put("/content/item", payload,
-      { params: { strict: true, expect: stamp.value || "none" } });
-    ElMessage.success("已保存并通过校验（点发布通知客户端）");
-    dlg.value = false; reload();
-  } catch (e) {
-    if (await askReloadOnConflict(e, "「载入最新」会把你这份没保存的改动就地换成别人那一版；"
-      + "想留着它就先别关这个弹窗，把字段抄到别处。")) await reopenWith(bizId);
-    // 其余错误（校验不通过等）拦截器已提示，弹窗保持打开供修正
-  } finally { saving.value = false; }
+  await run("save", async () => {
+    try {
+      // expect：把打开对话框那一刻的版本号带回去（空串=新增，服务端按「这行还不该存在」判）
+      await http.put("/content/item", payload,
+        { params: { strict: true, expect: stamp.value || "none" } });
+      ElMessage.success("已保存并通过校验，客户端下一次取内容就是这一版");
+      dlg.value = false; refreshVersion(); reload();
+    } catch (e) {
+      if (await askReloadOnConflict(e, "「载入最新」会把你这份没保存的改动就地换成别人那一版；"
+        + "想留着它就先别关这个弹窗，把字段抄到别处。")) await reopenWith(bizId);
+      // 其余错误（校验不通过等）拦截器已提示，弹窗保持打开供修正
+    }
+  });
 }
 
 /** 冲突之后唯一有用的动作：刷新列表，用当前生效那一版重开表单（不拿旧草稿去覆盖）。 */
@@ -289,32 +328,33 @@ async function reopenWith(id) {
 }
 
 async function toggle(row) {
-  try {
-    await http.post("/content/toggle", {}, {
-      params: { type: type.value, id: row.itemId, enabled: row.enabled ? 0 : 1, expect: row.updatedAt || "none" },
-    });
-  } catch (e) {
-    // 开关没有"草稿"要保：说清楚是谁动过，然后把列表刷回真相，让运营自己再决定一次
-    await explainConflict(e);
-  }
-  reload();
+  await run("toggle:" + row.itemId, async () => {
+    try {
+      await http.post("/content/toggle", {}, {
+        params: { type: type.value, id: row.itemId, enabled: row.enabled ? 0 : 1, expect: row.updatedAt || "none" },
+      });
+      refreshVersion();
+    } catch (e) {
+      // 开关没有"草稿"要保：说清楚是谁动过，然后把列表刷回真相，让运营自己再决定一次
+      await explainConflict(e);
+    }
+    reload();
+  });
 }
 async function del(row) {
-  await ElMessageBox.confirm(`确认删除 ${type.value}:${row.itemId}？删除前的内容会先存进历史，删错了能在【历史】里退回来。`, "提示", { type: "warning" });
-  try {
-    await http.delete("/content/item", {
-      params: { type: type.value, id: row.itemId, expect: row.updatedAt || "none" },
-    });
-    ElMessage.success("已删除，新版本已发布");
-  } catch (e) {
-    if (await explainConflict(e)) { reload(); return; }
-  }
-  reload();
-}
-async function publish() {
-  const d = await http.post("/content/publish", {});
-  version.value = d.version;
-  ElMessage.success("已发布，新版本 v" + d.version);
+  await run("del:" + row.itemId, async () => {
+    await ElMessageBox.confirm(`确认删除 ${type.value}:${row.itemId}？删除前的内容会先存进历史，删错了能在【历史】里退回来。`, "提示", { type: "warning" });
+    try {
+      await http.delete("/content/item", {
+        params: { type: type.value, id: row.itemId, expect: row.updatedAt || "none" },
+      });
+      ElMessage.success("已删除");
+      refreshVersion();
+    } catch (e) {
+      if (await explainConflict(e)) { reload(); return; }
+    }
+    reload();
+  });
 }
 
 /* ---------------- 历史与回滚（G3） ---------------- */
@@ -328,8 +368,10 @@ const SOURCE_LABEL = { edit: "覆盖写", delete: "删除", toggle: "启停", ro
 const hist = ref({ open: false, loading: false, rows: [], type: "", id: "", stamp: "" });
 
 async function openHistory(row) {
-  hist.value = { open: true, loading: true, rows: [], type: type.value, id: row.itemId, stamp: row.updatedAt || "" };
-  await refreshHistory();
+  await run("hist:" + row.itemId, async () => {
+    hist.value = { open: true, loading: true, rows: [], type: type.value, id: row.itemId, stamp: row.updatedAt || "" };
+    await refreshHistory();
+  });
 }
 
 /** 只重读历史列表，不动 stamp（回滚之后 stamp 来自服务端回体，比翻当前页可靠）。 */
@@ -345,25 +387,27 @@ async function rollback(r) {
   if (!hist.value.stamp)
     return ElMessage.warning("没拿到这一行的当前版本号（它已不在当前这一页）。请回列表按 ID 查询后再打开【历史】，"
       + "否则这次回滚会盖掉别人刚做的改动。");
-  await ElMessageBox.confirm(
-    `把 ${hist.value.type}:${hist.value.id} 退回「${fmt(r.createdAt)} 被${SOURCE_LABEL[r.source] || r.source}顶掉的那一版」？\n`
-    + "现在这一版会先存进历史，所以退回本身也能再退回来；这一版仍要过类型化校验，不通过会被拒。",
-    "回滚确认", { type: "warning" });
-  try {
-    const d = await http.post("/content/rollback", {},
-      { params: { rev: r.id, expect: hist.value.stamp } });
-    ElMessage.success(`已退回，内容版本 v${d.version}`);
-    version.value = d.version;
-    // 回滚自己就改了 live 行：抽屉里手上的版本号换成服务端回体给的那一份，
-    // 否则紧接着的第二次回滚会把自己刚才那次改动判成"别人改过"
-    hist.value.stamp = d.updatedAt || "";
-    await Promise.all([reload(), refreshHistory()]);
-  } catch (e) {
-    if (await explainConflict(e)) {
-      hist.value.stamp = "";
-      await reload();
+  await run("rollback:" + r.id, async () => {
+    await ElMessageBox.confirm(
+      `把 ${hist.value.type}:${hist.value.id} 退回「${fmt(r.createdAt)} 被${SOURCE_LABEL[r.source] || r.source}顶掉的那一版」？\n`
+      + "现在这一版会先存进历史，所以退回本身也能再退回来；这一版仍要过类型化校验，不通过会被拒。",
+      "回滚确认", { type: "warning" });
+    try {
+      const d = await http.post("/content/rollback", {},
+        { params: { rev: r.id, expect: hist.value.stamp } });
+      ElMessage.success(`已退回，内容版本 v${d.version}`);
+      version.value = d.version;
+      // 回滚自己就改了 live 行：抽屉里手上的版本号换成服务端回体给的那一份，
+      // 否则紧接着的第二次回滚会把自己刚才那次改动判成"别人改过"
+      hist.value.stamp = d.updatedAt || "";
+      await Promise.all([reload(), refreshHistory()]);
+    } catch (e) {
+      if (await explainConflict(e)) {
+        hist.value.stamp = "";
+        await reload();
+      }
     }
-  }
+  });
 }
 
 function fmt(t) { return t ? String(t).replace("T", " ").slice(0, 16) : ""; }

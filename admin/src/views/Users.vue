@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="bar"><el-input v-model="q" placeholder="搜索用户名" style="width:220px" @keyup.enter="reload" clearable />
-      <el-button @click="reload">查询</el-button></div>
+      <el-button :loading="busy('list')" @click="reload">查询</el-button></div>
     <el-table :data="rows" border height="calc(100vh - 160px)">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="username" label="用户名" />
@@ -24,7 +24,9 @@
                 <div style="color:#94a3b8;margin-top:4px">改动写审计日志（user.minor）</div>
               </div>
             </template>
-            <el-switch :model-value="!!s.row.minor" :disabled="!auth.canWrite" @change="setMinor(s.row, $event)" />
+            <!-- 防连点（H6-4）：这一档改的是"这个账号能不能玩"，第二次点会把第一次那次覆盖成反的 -->
+            <el-switch :model-value="!!s.row.minor" :disabled="!auth.canWrite || busy('minor:' + s.row.id)"
+                       :loading="busy('minor:' + s.row.id)" @change="setMinor(s.row, $event)" />
           </el-tooltip>
           <span class="tip">{{ s.row.minor ? '限时段' : '不限' }}</span>
         </template>
@@ -38,13 +40,17 @@
       <el-table-column prop="last_login_at" label="最近登录" width="200" />
       <el-table-column label="操作" width="380">
         <template #default="s">
-          <el-button link type="primary" @click="viewSave(s.row)">存档</el-button>
-          <el-button link @click="viewRevs(s.row)">历史</el-button>
+          <el-button link type="primary" :loading="busy('save:' + s.row.id)" @click="viewSave(s.row)">存档</el-button>
+          <el-button link :loading="busy('revs:' + s.row.id)" @click="viewRevs(s.row)">历史</el-button>
           <el-button v-if="auth.isSuper" link type="primary" @click="openAssets(s.row)">调整资产</el-button>
-          <el-button v-if="auth.canWrite && !s.row.status" link type="warning" @click="ban(s.row)">封禁</el-button>
-          <el-button v-if="auth.canWrite && s.row.status" link type="success" @click="unban(s.row)">解封</el-button>
-          <el-button v-if="auth.isSuper && !s.row.is_guest" link @click="resetPass(s.row)">重置口令</el-button>
-          <el-button v-if="auth.canWrite" link type="danger" @click="del(s.row)">删除</el-button>
+          <el-button v-if="auth.canWrite && !s.row.status" link type="warning"
+                    :loading="busy('ban:' + s.row.id)" @click="ban(s.row)">封禁</el-button>
+          <el-button v-if="auth.canWrite && s.row.status" link type="success"
+                    :loading="busy('unban:' + s.row.id)" @click="unban(s.row)">解封</el-button>
+          <el-button v-if="auth.isSuper && !s.row.is_guest" link
+                     :loading="busy('pass:' + s.row.id)" @click="resetPass(s.row)">重置口令</el-button>
+          <el-button v-if="auth.canWrite" link type="danger"
+                     :loading="busy('del:' + s.row.id)" @click="del(s.row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -65,7 +71,8 @@
         <el-table-column prop="createdAt" label="时间" />
         <el-table-column prop="bytes" label="大小" width="90" />
         <el-table-column label="操作" width="100">
-          <template #default="s"><el-button v-if="auth.canWrite" link type="primary" @click="rollback(s.row)">回滚</el-button></template>
+          <template #default="s"><el-button v-if="auth.canWrite" link type="primary"
+            :loading="busy('rollback:' + s.row.revision)" @click="rollback(s.row)">回滚</el-button></template>
         </el-table-column>
       </el-table>
     </el-dialog>
@@ -90,7 +97,7 @@
       </el-form>
       <template #footer>
         <el-button @click="assetDlg=false">取消</el-button>
-        <el-button type="primary" :disabled="!assetDirty" @click="saveAssets">确认调整</el-button>
+        <el-button type="primary" :disabled="!assetDirty" :loading="busy('assets')" @click="saveAssets">确认调整</el-button>
       </template>
     </el-dialog>
   </div>
@@ -100,9 +107,13 @@
 import { computed, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import http from "../api";
+import { useBusy } from "../busy";
 import { useAuth } from "../store";
 
 const auth = useAuth();
+/* 防连点（H6-4）：每一处会写库的动作带一个自己的在途标记（ban:12 这样"动作 + 那一行"），
+   按钮据此置灰——点 A 行的封禁不会把别人那一行的按钮一起锁住。见 ../busy.js。 */
+const { busy, run } = useBusy();
 const q = ref("");
 const rows = ref([]);
 const total = ref(0);
@@ -119,13 +130,23 @@ const assetDirty = computed(() => !!assetForm.value.coins || !!assetForm.value.d
 
 onMounted(reload);
 async function reload() {
-  const d = await http.get("/users", { params: { q: q.value, size, off: (page.value - 1) * size } });
-  rows.value = d.rows; total.value = d.total;
+  await run("list", async () => {
+    const d = await http.get("/users", { params: { q: q.value, size, off: (page.value - 1) * size } });
+    rows.value = d.rows; total.value = d.total;
+  });
 }
 function onPage(p) { page.value = p; reload(); }
 
-async function viewSave(row) { curUser.value = row; saveInfo.value = await http.get("/users/save", { params: { id: row.id } }); saveDlg.value = true; }
-async function viewRevs(row) { curUser.value = row; revs.value = await http.get("/users/save/revisions", { params: { id: row.id } }); revDlg.value = true; }
+async function viewSave(row) {
+  await run("save:" + row.id, async () => {
+    curUser.value = row; saveInfo.value = await http.get("/users/save", { params: { id: row.id } }); saveDlg.value = true;
+  });
+}
+async function viewRevs(row) {
+  await run("revs:" + row.id, async () => {
+    curUser.value = row; revs.value = await http.get("/users/save/revisions", { params: { id: row.id } }); revDlg.value = true;
+  });
+}
 
 function openAssets(row) {
   curUser.value = row;
@@ -141,12 +162,14 @@ function preview(now, delta) {
 async function saveAssets() {
   const c = Number(assetForm.value.coins || 0), d = Number(assetForm.value.diamonds || 0);
   if (!c && !d) return ElMessage.warning("至少填一项非零的增减量");
-  await ElMessageBox.confirm(
-    `将 ${curUser.value.username} 的金币 ${signed(c)}、钻石 ${signed(d)}。这一步会写进审计日志与玩家的存档历史（来源标记为 admin）。`,
-    "确认调整玩家资产", { type: "error", confirmButtonText: "确认调整" });
-  const r = await http.post("/users/assets", { coins: c, diamonds: d }, { params: { id: curUser.value.id } });
-  ElMessage.success(`已调整：🪙 ${n(r.coinsBefore)} → ${n(r.coinsAfter)} · 💎 ${n(r.diamondsBefore)} → ${n(r.diamondsAfter)}`);
-  assetDlg.value = false; reload();
+  await run("assets", async () => {
+    await ElMessageBox.confirm(
+      `将 ${curUser.value.username} 的金币 ${signed(c)}、钻石 ${signed(d)}。这一步会写进审计日志与玩家的存档历史（来源标记为 admin）。`,
+      "确认调整玩家资产", { type: "error", confirmButtonText: "确认调整" });
+    const r = await http.post("/users/assets", { coins: c, diamonds: d }, { params: { id: curUser.value.id } });
+    ElMessage.success(`已调整：🪙 ${n(r.coinsBefore)} → ${n(r.coinsAfter)} · 💎 ${n(r.diamondsBefore)} → ${n(r.diamondsAfter)}`);
+    assetDlg.value = false; reload();
+  });
 }
 function signed(v) { return (v > 0 ? "+" : "") + n(v); }
 
@@ -157,14 +180,16 @@ function signed(v) { return (v > 0 ? "+" : "") + n(v); }
  * 窗口、放行日、下次可玩时刻都以它为准，运营点完当场能看到生效没有。
  */
 async function setMinor(row, on) {
-  if (on) {
-    await ElMessageBox.confirm(
-      `将 ${row.username} 标记为青少年账号：此后只在【运营配置 · 防沉迷时段】放行的日子与窗口内能进游戏，其余时间每一次操作都会被服务端挡下（游戏内会显示下次可玩时刻，不是白屏）。`,
-      "确认开启青少年模式", { type: "warning", confirmButtonText: "标记" });
-  }
-  const v = await http.post("/users/minor", null, { params: { id: row.id, on: !!on } });
-  row.minor = on ? 1 : 0;   // 用返回视图回写行状态，失败时开关保持原样
-  ElMessage.success(minorSummary(v));
+  await run("minor:" + row.id, async () => {
+    if (on) {
+      await ElMessageBox.confirm(
+        `将 ${row.username} 标记为青少年账号：此后只在【运营配置 · 防沉迷时段】放行的日子与窗口内能进游戏，其余时间每一次操作都会被服务端挡下（游戏内会显示下次可玩时刻，不是白屏）。`,
+        "确认开启青少年模式", { type: "warning", confirmButtonText: "标记" });
+    }
+    const v = await http.post("/users/minor", null, { params: { id: row.id, on: !!on } });
+    row.minor = on ? 1 : 0;   // 用返回视图回写行状态，失败时开关保持原样
+    ElMessage.success(minorSummary(v));
+  });
 }
 function minorSummary(v) {
   if (!v) return "已更新";
@@ -174,27 +199,39 @@ function minorSummary(v) {
 }
 
 async function ban(row) {
-  const { value } = await ElMessageBox.prompt("封禁天数", "封禁用户", { inputValue: "7", inputPattern: /^\d+$/, inputErrorMessage: "请输入数字" });
-  await http.post("/users/ban", null, { params: { id: row.id, days: value } });
-  ElMessage.success("已封禁"); reload();
+  await run("ban:" + row.id, async () => {
+    const { value } = await ElMessageBox.prompt("封禁天数", "封禁用户", { inputValue: "7", inputPattern: /^\d+$/, inputErrorMessage: "请输入数字" });
+    await http.post("/users/ban", null, { params: { id: row.id, days: value } });
+    ElMessage.success("已封禁"); reload();
+  });
 }
-async function unban(row) { await http.post("/users/unban", null, { params: { id: row.id } }); ElMessage.success("已解封"); reload(); }
+async function unban(row) {
+  await run("unban:" + row.id, async () => {
+    await http.post("/users/unban", null, { params: { id: row.id } }); ElMessage.success("已解封"); reload();
+  });
+}
 async function resetPass(row) {
-  const { value } = await ElMessageBox.prompt(
-    `为 ${row.username} 设置新口令（至少 6 位，不能与用户名相同）。重置后该玩家的刷新令牌全部作废，已打开的页面最长还能用到访问令牌自然过期（约 2 小时）。`,
-    "重置玩家口令",
-    { inputPlaceholder: "新口令", inputValidator: v => (v && v.length >= 6) ? true : "至少 6 位" });
-  await http.post("/users/reset-password", { pass: value }, { params: { id: row.id } });
-  ElMessage.success("已重置，请把新口令告知玩家");
+  await run("pass:" + row.id, async () => {
+    const { value } = await ElMessageBox.prompt(
+      `为 ${row.username} 设置新口令（至少 6 位，不能与用户名相同）。重置后该玩家的刷新令牌全部作废，已打开的页面最长还能用到访问令牌自然过期（约 2 小时）。`,
+      "重置玩家口令",
+      { inputPlaceholder: "新口令", inputValidator: v => (v && v.length >= 6) ? true : "至少 6 位" });
+    await http.post("/users/reset-password", { pass: value }, { params: { id: row.id } });
+    ElMessage.success("已重置，请把新口令告知玩家");
+  });
 }
 async function del(row) {
-  await ElMessageBox.confirm(`删除用户 ${row.username} 及其存档？不可恢复`, "危险操作", { type: "error" });
-  await http.delete("/users", { params: { id: row.id } }); ElMessage.success("已删除"); reload();
+  await run("del:" + row.id, async () => {
+    await ElMessageBox.confirm(`删除用户 ${row.username} 及其存档？不可恢复`, "危险操作", { type: "error" });
+    await http.delete("/users", { params: { id: row.id } }); ElMessage.success("已删除"); reload();
+  });
 }
 async function rollback(r) {
-  await ElMessageBox.confirm(`回滚到版本 ${r.revision}？`, "确认");
-  await http.post("/users/save/rollback", null, { params: { id: curUser.value.id, revision: r.revision } });
-  ElMessage.success("已回滚"); revDlg.value = false;
+  await run("rollback:" + r.revision, async () => {
+    await ElMessageBox.confirm(`回滚到版本 ${r.revision}？`, "确认");
+    await http.post("/users/save/rollback", null, { params: { id: curUser.value.id, revision: r.revision } });
+    ElMessage.success("已回滚"); revDlg.value = false;
+  });
 }
 function pretty(p) { try { return JSON.stringify(typeof p === "string" ? JSON.parse(p) : p, null, 2); } catch (e) { return p; } }
 function fmt(t) { return t ? new Date(t).toLocaleString() : "-"; }

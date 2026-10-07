@@ -17,6 +17,10 @@ const routes = [
       { path: "admins", component: () => import("./views/Admins.vue"), meta: { title: "管理员账号", super: true } },
     ],
   },
+  /* 兜底（H6-6）：hash 路由里没有匹配项时 vue-router 什么都不渲染——收藏错一条链接、
+     或者手敲一个 /admin/#/user（少个 s），运营拿到的是一片白屏加上控制台里一句警告，
+     没有任何东西告诉他"回哪儿去"。未知路径统一回看板：那里一定有菜单，人不会丢。 */
+  { path: "/:catchAll(.*)", redirect: "/dashboard" },
 ];
 
 const router = createRouter({ history: createWebHashHistory("/admin/"), routes });

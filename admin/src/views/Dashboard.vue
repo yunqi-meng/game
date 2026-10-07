@@ -14,8 +14,8 @@
         <div class="hd">
           <span>日报（聚合表 daily_stats）</span>
           <span class="hdropt">
-            <el-button v-if="auth.canWrite" size="small" :loading="rolling" @click="roll(0)">重算今天</el-button>
-            <el-button v-if="auth.canWrite" size="small" text @click="roll(-1)">补算昨天</el-button>
+            <el-button v-if="auth.canWrite" size="small" :loading="busy('roll:0')" @click="roll(0)">重算今天</el-button>
+            <el-button v-if="auth.canWrite" size="small" text :loading="busy('roll:-1')" @click="roll(-1)">补算昨天</el-button>
           </span>
         </div>
       </template>
@@ -42,17 +42,33 @@
 </template>
 
 <script setup>
-import { onMounted, ref, nextTick } from "vue";
-import * as echarts from "echarts";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
+/* echarts 按需注册（H6-5）：以前这里 import * as echarts from "echarts"，把整套发行版
+   （地图、关系图、3D、词云、SVG 渲染器、全部图表类型）一起打进了 Dashboard-*.js——1.04 MB，
+   而这个面板一辈子只画一条带面积的近 14 日折线。现在只装用得上的那四件：
+   line 图 + 直角坐标系（grid）+ 轴触发 tooltip + canvas 渲染器。
+   以后这张面板要加图表类型，得往下面的 use([...]) 里补一件；少一件的表现为"那张图安静地画不出来"，
+   所以清单就写在这张图的旁边，改图的人一眼就看得见。 */
+import * as echarts from "echarts/core";
+import { LineChart } from "echarts/charts";
+import { GridComponent, TooltipComponent } from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 import { ElMessage } from "element-plus";
 import http from "../api";
+import { useBusy } from "../busy";
 import { useAuth } from "../store";
 
+echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
+
 const auth = useAuth();
+const { busy, run } = useBusy();
 const ov = ref({});
 const daily = ref([]);
 const trendEl = ref(null);
-const rolling = ref(false);
+/** 图表实例留在模块里（不是 ref：它不是响应式数据，包一层只会让 Vue 去深遍历 echarts 的内部状态）。 */
+let chart = null;
+
+function onWindowResize() { if (chart && !chart.isDisposed()) chart.resize(); }
 
 onMounted(async () => {
   ov.value = await http.get("/dashboard/overview");
@@ -60,7 +76,7 @@ onMounted(async () => {
   daily.value = (tr && tr.recentDaily) || [];
   await nextTick();
   if (trendEl.value) {
-    const chart = echarts.init(trendEl.value);
+    chart = echarts.init(trendEl.value);
     const rows = tr.logins || [];
     chart.setOption({
       tooltip: { trigger: "axis" },
@@ -68,7 +84,15 @@ onMounted(async () => {
       yAxis: { type: "value" },
       series: [{ name: "登录用户", type: "line", smooth: true, areaStyle: {}, data: rows.map((r) => r.n) }],
     });
+    // 后台是嵌在侧栏里的，窗口一窄这张图就糊在右边：resize 得挂上
+    window.addEventListener("resize", onWindowResize);
   }
+});
+
+// 离开看板时 echarts 的实例不会自己散架：canvas、事件与 DOM 引用会跟着这个已卸载的组件一直留着
+onUnmounted(() => {
+  window.removeEventListener("resize", onWindowResize);
+  if (chart) { chart.dispose(); chart = null; }
 });
 function fmt(d) { return d ? String(d).slice(0, 10) : ""; }
 
@@ -84,19 +108,18 @@ function dayStr(off) {
 }
 
 async function roll(off) {
-  const day = dayStr(off);
-  rolling.value = true;
-  try {
-    const row = await http.post("/dashboard/roll", null, { params: { day } });
-    // 重算是覆盖式的：同一天的数点几次都是同一个值，不会把 DAU 刷成两倍
-    ElMessage.success(`${day} 已重算：活跃 ${row.dau}、新增 ${row.newUsers}、成功反应 ${row.reactions}`);
-    const tr = await http.get("/dashboard/trend", { params: { days: 14 } });
-    daily.value = (tr && tr.recentDaily) || [];
-  } catch (e) {
-    // 失败由 api.js 的拦截器统一 toast（含 403"当前角色无写权限"），这里只把按钮放回来
-  } finally {
-    rolling.value = false;
-  }
+  await run("roll:" + off, async () => {
+    const day = dayStr(off);
+    try {
+      const row = await http.post("/dashboard/roll", null, { params: { day } });
+      // 重算是覆盖式的：同一天的数点几次都是同一个值，不会把 DAU 刷成两倍
+      ElMessage.success(`${day} 已重算：活跃 ${row.dau}、新增 ${row.newUsers}、成功反应 ${row.reactions}`);
+      const tr = await http.get("/dashboard/trend", { params: { days: 14 } });
+      daily.value = (tr && tr.recentDaily) || [];
+    } catch (e) {
+      // 失败由 api.js 的拦截器统一 toast（含 403"当前角色无写权限"），这里只把按钮放回来
+    }
+  });
 }
 </script>
 
