@@ -54,15 +54,32 @@ jobs:
           echo "CHEMERA_JWT_SECRET=$val" >> "$GITHUB_ENV"
 
       - name: 起 MySQL 8
+        # 时区这条是迭代 4 首跑踩出来的：上面 env 里的 TZ 只作用于 runner（JVM 因此在 +08:00），
+        # 而这只容器默认 UTC。当时 user_session 的 rotated_at/revoked_at 由 SQL 的 NOW() 盖、
+        # AuthService.refresh 拿 LocalDateTime.now() 判，两支钟差 8 小时——刚轮换的会话当场算"超期"，
+        # 整户下线，51 条断言级联成 401。代码侧已经改成"谁判断，谁的时钟写"（见 SessionMapper），
+        # 这里再把库的钟拨到声明的那个小时：两件事都做，才让 DDL 里那些 DEFAULT CURRENT_TIMESTAMP
+        # 的列（app_user.created_at 等）不再和后台显示的时间差 8 小时。
         run: |
           docker run -d --name chemera-mysql \
             -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+            -e TZ="$TZ" \
             -p 3306:3306 \
-            mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+            mysql:8.0 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
+              --default-time-zone=+08:00
           for i in $(seq 1 60); do
             docker exec chemera-mysql mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent && break
             sleep 2
           done
+          # 就绪后再确认一次它真的是 +08:00：宁可这里红，也不要让 51 条断言替它说话
+          TZ_ROW=$(docker exec chemera-mysql mysql -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B -e \
+            "SELECT @@global.time_zone, NOW() > UTC_TIMESTAMP(), @@system_time_zone") \
+            || { echo "✗ 查不到 MySQL 的时区：库没就绪或连接不通，先看上一段 ping 的轮询有没有走完"; exit 1; }
+          echo "MySQL 时区行：$TZ_ROW"
+          case "$TZ_ROW" in
+            +08:00*) echo "✓ MySQL 与应用声明同一个时区（global time_zone=+08:00）" ;;
+            *) echo "✗ MySQL 的 global time_zone 不是 +08:00，NOW() 与 JVM 的 LocalDateTime.now() 就会差出小时数"; exit 1 ;;
+          esac
 
       # 建库 + 应用账号走仓库里那份 bootstrap.sql：CI 与本地用同一条初始化路径，
       # 免得"本地能跑、CI 跑不了"变成第 N 个只有一个人知道的坑。
