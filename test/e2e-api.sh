@@ -1492,17 +1492,31 @@ console.log(r&&String(r.detail).indexOf("saveRevisions")>=0?"yes":"no")' "$GBUID
 [ "$DELAUD" = "yes" ] && ok "审计里留着这次删号删了几行的凭据" || no "删号审计" "audit=$DELAUD"
 # 终局对账下探到库里：HTTP 回执报的是"删了几行"，而注销的合规承诺是"库里没有这个人的行"，只有查库说得清。
 if command -v mysql >/dev/null 2>&1 && [ -n "${CHEMERA_DB_PASSWORD:-}" ]; then
-  dbq() { MYSQL_PWD="$CHEMERA_DB_PASSWORD" mysql -h "${CHEMERA_DB_HOST:-localhost}" -P "${CHEMERA_DB_PORT:-3306}" \
-    -u "${CHEMERA_DB_USER:-chem}" -D "${CHEMERA_DB_NAME:-chemera}" -N -B -e "$1" 2>/dev/null; }
-  for t in "app_user:id" "user_save:user_id" "user_save_revision:user_id" "user_session:user_id" "analytics_event:user_id"; do
-    TAB=${t%%:*}; COL=${t#*:}
-    LEFT=$(dbq "SELECT COUNT(*) FROM $TAB WHERE $COL=$GBUID")
-    [ "$LEFT" = "0" ] && ok "库里 $TAB 已无此人的行" || no "$TAB 残留" "rows=$LEFT"
-  done
-  FILLED=$(dbq "SELECT COUNT(*) FROM report WHERE reporter=$GBUID")
-  [ "$FILLED" = "0" ] && ok "库里 report 里他发起的行清零" || no "report 残留" "rows=$FILLED"
-  NULLTGT=$(dbq "SELECT target_user IS NULL FROM report WHERE reason='$ABOUT'")
-  [ "$NULLTGT" = "1" ] && ok "库里那条针对他的举报留着，target_user 已置空（线索不随注销蒸发）" || no "举报置空" "target_user IS NULL=$NULLTGT"
+  # 默认主机是 127.0.0.1 而不是 localhost：mysql 命令行客户端拿 `localhost` 会去连本机
+  # unix socket（Windows 上没有 socket 所以本机一直碰巧走 TCP），而 CI 的库在 Docker 里、
+  # 只往 3306 端口上映射——runner 的那条 socket 根本不存在。连不上时原先 2>/dev/null 把
+  # 错误吞了，7 条断言逐条打成 `rows=`（空串），看着像"库里真有残留"，其实是没连上。
+  # 所以这里先探一次：连不上就红一条并附上客户端自己的话，不再让七条假残留替它说话。
+  DB_HOST="${CHEMERA_DB_HOST:-127.0.0.1}"
+  DB_PORT="${CHEMERA_DB_PORT:-3306}"
+  # 结果走 stdout、客户端的话走 stderr 单独留一份：断言只比较干净的数字，而"为什么连不上"
+  # 要能原样打进那条红里（所以这里不把 stderr 折进 stdout——一句 warning 就能把绿跑判成红）。
+  dbq() { MYSQL_PWD="$CHEMERA_DB_PASSWORD" mysql -h "$DB_HOST" -P "$DB_PORT" \
+    -u "${CHEMERA_DB_USER:-chem}" -D "${CHEMERA_DB_NAME:-chemera}" -N -B -e "$1" 2>/tmp/chemera-dbq.err; }
+  PREFLIGHT=$(dbq "SELECT 1")
+  if [ "$PREFLIGHT" != "1" ]; then
+    no "逐表查库" "mysql 客户端在，但 $DB_HOST:$DB_PORT 这条连接没起来（$(head -c 300 /tmp/chemera-dbq.err)）——上面那些 HTTP 回执仍是删号的凭据，但'库里没有这个人的行'这条承诺没被验到"
+  else
+    for t in "app_user:id" "user_save:user_id" "user_save_revision:user_id" "user_session:user_id" "analytics_event:user_id"; do
+      TAB=${t%%:*}; COL=${t#*:}
+      LEFT=$(dbq "SELECT COUNT(*) FROM $TAB WHERE $COL=$GBUID")
+      [ "$LEFT" = "0" ] && ok "库里 $TAB 已无此人的行" || no "$TAB 残留" "rows=$LEFT"
+    done
+    FILLED=$(dbq "SELECT COUNT(*) FROM report WHERE reporter=$GBUID")
+    [ "$FILLED" = "0" ] && ok "库里 report 里他发起的行清零" || no "report 残留" "rows=$FILLED"
+    NULLTGT=$(dbq "SELECT target_user IS NULL FROM report WHERE reason='$ABOUT'")
+    [ "$NULLTGT" = "1" ] && ok "库里那条针对他的举报留着，target_user 已置空（线索不随注销蒸发）" || no "举报置空" "target_user IS NULL=$NULLTGT"
+  fi
 else
   echo "  - 跳过逐表查库（本机没有 mysql 客户端或缺 CHEMERA_DB_PASSWORD）：上面那几行 HTTP 回执仍是删号的凭据"
 fi

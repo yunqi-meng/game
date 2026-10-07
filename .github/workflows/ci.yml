@@ -131,9 +131,20 @@ jobs:
 
       # MVN_FLAGS= 是为了冷缓存：test/ci.sh 默认带 -o（离线），本机 .m2 早就满了能省几分钟，
       # 而全新 runner 第一个依赖就解析不到，会把整条流水线红在环境上而不是代码上。
+      # （这一支以前不生效：ci.sh 写的是 `${MVN_FLAGS:--o}`，带冒号把"显式传空"也当成没传，
+      #  于是冷缓存照样 -o，两秒 BUILD FAILURE。现在 ci.sh 改成 `${MVN_FLAGS--o}`。）
+      #
+      # 下面这四个变量是给 e2e 那句"逐表查库"用的：那一段直接起 mysql 客户端对账，
+      # 而上一个步骤的 `export` 不会跨过步骤边界——没有 CHEMERA_DB_HOST 时脚本按默认值
+      # 连本机 unix socket，可库在 Docker 里、只映射了 3306，于是七条断言全部拿到空输出，
+      # 打成七条 `rows=`，看着像"注销没清干净"，其实是连不上。诚实的红应该只有一条。
       - name: 全量回归 (test/ci.sh)
         env:
           MVN_FLAGS: ""
+          CHEMERA_DB_HOST: 127.0.0.1
+          CHEMERA_DB_PORT: "3306"
+          CHEMERA_DB_NAME: chemera
+          CHEMERA_DB_USER: chem
         run: bash test/ci.sh http://localhost:8080
 
       - name: 失败时留证据

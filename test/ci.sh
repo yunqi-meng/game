@@ -19,7 +19,11 @@ cd "$(dirname "$0")/.."
 BASE="${1:-http://localhost:8080}"
 # `-o`（离线）是这台开发机的便利：本地 .m2 早就满了，离线能省掉每次几分钟的解析。
 # CI 上冷缓存跑 `-o` 只会在第一个依赖上失败，所以留个口子：CI 传 MVN_FLAGS= 走在线解析。
-MVN_FLAGS="${MVN_FLAGS:--o}"
+#
+# 这里必须是 `${VAR-default}` 而不是 `${VAR:-default}`：带冒号的那一支把"显式传空"也当成没传，
+# 于是 CI 的 `MVN_FLAGS: ""` 被吃回 -o，冷缓存的 runner 在两秒内 BUILD FAILURE，而屏上只留下
+# 一行 grep 出来的 "BUILD FAILURE"（真实原因在管道里被吞了）。第一次真跑就红在这上面。
+MVN_FLAGS="${MVN_FLAGS--o}"
 # ADMIN_CHECK=skip 给"只改了后端"的本地快跑用：那一次 vite build 要十几秒，而产物没动过的话它对不出新信息
 ADMIN_CHECK="${ADMIN_CHECK:-run}"
 FAIL=0
@@ -36,8 +40,17 @@ else
 fi
 
 echo
-echo "### 3/5 后端单元测试 (mvn $MVN_FLAGS test)"
-(cd server && mvn $MVN_FLAGS test | grep -E "Tests run:.*Failures|BUILD" | tail -3) || FAIL=1
+echo "### 3/5 后端单元测试 (mvn ${MVN_FLAGS:-（在线解析）} test)"
+# 和第 4 层同一个道理：以前这里 `mvn test | grep | tail -3`，编译失败时屏幕上只有
+# 一句 "BUILD FAILURE"，`[ERROR]` 那几十行全在管道里没了——而"红在哪"恰恰是唯一想知道的事。
+# 全文留一份，失败时把 ERROR 原样打出来。
+MVN_LOG="$(pwd)/server/logs/mvn-latest.log"
+mkdir -p "$(dirname "$MVN_LOG")"
+(cd server && mvn $MVN_FLAGS test | tee "$MVN_LOG" | grep -E "Tests run:.*Failures|BUILD" | tail -3) || FAIL=1
+if ! grep -q "BUILD SUCCESS" "$MVN_LOG"; then
+  echo "  ✗ 这一层没过，[ERROR] 原文（全文见 $MVN_LOG）："
+  grep -E "^\[ERROR\]" "$MVN_LOG" | head -20
+fi
 
 echo
 echo "### 4/5 端到端 API (test/e2e-api.sh)"
