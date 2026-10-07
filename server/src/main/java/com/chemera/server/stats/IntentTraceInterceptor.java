@@ -19,8 +19,9 @@ import java.util.function.LongSupplier;
  * <p>{@code SqlCounter.end()} 放在 {@code afterCompletion} 的 finally：Tomcat 会复用线程，
  * 漏一次清理，下一个请求就会把上一个人的条数加到自己头上——那种数字比没有数字更害人。
  *
- * <p>第二个职责：判断这一次有没有<b>顺带重建内容快照</b>。做法是问注册表"重建计数器现在几了"，
- * 前后不一就是涨了——把这件事标进统计，预算那条尺子才量得准（见 {@link IntentMetrics#record}）。
+ * <p>第二个职责：判断这一次有没有<b>顺带替内容缓存干了活</b>。做法是问注册表"那本总账现在几了"
+ * （{@link ContentRegistry#cacheWork()}：整包重建 + 版本号真读库各一笔），前后不一就是涨了——
+ * 把这件事标进统计，预算那条尺子才量得准（见 {@link IntentMetrics#record}）。
  * 这里刻意只认一个 {@link LongSupplier} 而不是直接依赖 {@code ContentRegistry} 的行为：
  * 拦截器要的是"一个会涨的数"，测试好喂，将来换成别的缓存实现也不用改这一层。
  */
@@ -28,33 +29,36 @@ import java.util.function.LongSupplier;
 public class IntentTraceInterceptor implements HandlerInterceptor {
 
     private static final String AT = "chemera.intent.start";
-    private static final String RB = "chemera.intent.rebuilds";
+    private static final String RB = "chemera.intent.cacheWork";
     private static final String GAME = "/api/game/";
 
     private final IntentMetrics metrics;
-    private final LongSupplier rebuilds;
+    private final LongSupplier cacheWork;
 
     /**
      * 容器走这条。{@code @Autowired} 不是装饰：这里有两个构造（下面还有个测试入口），
      * Spring 只在"恰好一个构造"时才自己猜，多一个就得写明用哪个，否则退回去找无参构造——
      * 启动时表现为 {@code No default constructor found}，整条意图统计跟着起不来。
+     *
+     * <p>喂进来的是 {@link ContentRegistry#cacheWork()} 而不是 {@code rebuilds()}：那条 SQL 预算要滤掉的是
+     * "内容缓存替这条意图干的活"，它有两种形状——整包重建，以及那份 1 秒版本号缓存到期时真去问一次库。
      */
     @Autowired
     public IntentTraceInterceptor(IntentMetrics metrics, ContentRegistry registry) {
-        this(metrics, registry::rebuilds);
+        this(metrics, registry::cacheWork);
     }
 
     /** 测试用入口：给一个会涨的计数器就行。 */
-    IntentTraceInterceptor(IntentMetrics metrics, LongSupplier rebuilds) {
+    IntentTraceInterceptor(IntentMetrics metrics, LongSupplier cacheWork) {
         this.metrics = metrics;
-        this.rebuilds = rebuilds;
+        this.cacheWork = cacheWork;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest req, HttpServletResponse res, Object h) {
         if (!worth(req)) return true;
         req.setAttribute(AT, System.nanoTime());
-        req.setAttribute(RB, rebuilds.getAsLong());
+        req.setAttribute(RB, cacheWork.getAsLong());
         SqlCounter.begin();
         return true;
     }
@@ -66,8 +70,12 @@ public class IntentTraceInterceptor implements HandlerInterceptor {
         try {
             long ms = (System.nanoTime() - (Long) st) / 1_000_000;
             Object before = req.getAttribute(RB);
-            boolean rebuilt = before instanceof Long b && rebuilds.getAsLong() != b;
-            metrics.record(req.getRequestURI().substring(GAME.length()), ms, SqlCounter.snapshot(), rebuilt);
+            boolean didCacheWork = before instanceof Long b && cacheWork.getAsLong() != b;
+            // 被挡在门外的那些次（401 令牌失效、403 宵禁、429 限流、5xx）只走了一两条 SELECT 就返回，
+            // 它们不是"这条链的形状"。混进最小值会把预算读成 1 条，尺子就空转了——所以一起标成脏样本。
+            boolean offChain = didCacheWork || res.getStatus() >= 400;
+            metrics.record(req.getRequestURI().substring(GAME.length()), ms,
+                    SqlCounter.snapshot(), offChain);
         } finally {
             SqlCounter.end();
         }

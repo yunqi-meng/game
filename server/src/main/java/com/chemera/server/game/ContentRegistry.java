@@ -39,6 +39,19 @@ public class ContentRegistry {
         return rebuilds.get();
     }
 
+    /**
+     * "内容缓存替这条意图干了活"的总账：整包重建 + 版本号那一次真读库，两个单调计数之和。
+     *
+     * <p>意图 SQL 预算（G8）读的就是这个数的前后差——只要它涨了，这一次的样本就不该参与最小值。
+     * 只数重建是不够的：{@code ContentService} 那份 1 秒版本号缓存到期时也会多发一条
+     * {@code SELECT version FROM content_version}，而"哪一条意图摊上这一秒"纯属排期。
+     * {@code sandbox.exit} 就这么在 6 条与 7 条之间来回跳过（它的现场只在脚本最后一段被调用一次，
+     * 样本数 = 1，最小值就等于那一次的运气），见 {@code ContentService.versionPolls}。
+     */
+    public long cacheWork() {
+        return rebuilds.get() + content.versionPolls();
+    }
+
     /** 当前快照；content_version 变化时重建。 */
     @SuppressWarnings("unchecked")
     public Snapshot current() {

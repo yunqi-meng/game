@@ -69,33 +69,77 @@ class IntentTraceTest {
      *
      * <p>e2e 那条"单次意图 ≤6 条 SQL"的预算读的是这个值而不是 {@code avgSql}，因为平均值里混着
      * 两种不该算进链路的噪声：内容缓存刚被后台改动失效，紧接着那条意图要多跑几条 SELECT 把包重攒
-     * 出来（运营动作的代价）；而这一层是进程内存，同一台服务端连着跑两轮回归，平均值还会把上一轮
-     * 也算进来。
+     * 出来（运营动作的代价）；版本号那份 1 秒缓存到期时又多一条 {@code content_version} 的读数
+     * （跟链的形状无关，只是谁踩在那一秒上）。而这一层是进程内存，同一台服务端连着跑两轮回归，
+     * 平均值还会把上一轮也算进来。
      *
      * <p>注意标记是<b>显式</b>的（第四个参数），不是"取最小值自然就没噪声"：
      * claim.ach 在回归里只在"后台刚改过内容"那一段被调用，所以它每一个样本都带着重建的那几条，
      * 只靠最小值会把这条链读成 7 条而其实它是 4 条——那条预算就会红在排期上而不是红在链路上。
      */
     @Test
-    void minSqlIsTheWarmChainNotTheRebuildNoise() {
+    void minSqlIsTheWarmChainNotTheCacheNoise() {
         metrics.record("claim.ach", 5, 4);         // 温缓存：链自己就这几条
-        metrics.record("claim.ach", 5, 7, true);   // 同一时刻涨了重建计数：多的是内容重载
+        metrics.record("claim.ach", 5, 7, true);   // 同一时刻涨了缓存计数：多的是内容重载
         metrics.record("claim.ach", 5, 5);
 
         Map<String, Object> row = metrics.snapshot().get(0);
         assertEquals(5.3, (Double) row.get("avgSql"), 0.001, "平均值会把那次重建摊进来：" + row);
         assertEquals(4L, row.get("minSql"), "预算该钉在温缓存那一次，而不是被重建抬高：" + row);
         assertEquals(2L, row.get("warmSqlSamples"), "干净样本两次：" + row);
-        assertEquals(1L, row.get("rebuildSqlSamples"), "带重建的样本一次：" + row);
+        assertEquals(1L, row.get("coldSqlSamples"), "替内容缓存干过活的样本一次：" + row);
     }
 
     /**
-     * 一条意图如果<b>每个</b>样本都落在重建窗口里，宁可没有下界也不给一个假的。
+     * 现场那一幕：{@code sandbox.exit} 只在脚本最后被调用一次，那一次恰好跨过版本号 TTL。
+     *
+     * <p>样本数 = 1 的时候"最小值"就等于那一次的运气，同一条链会在 6 与 7 之间来回跳，红的那一轮
+     * 查半天其实链没变胖。标上缓存计数以后，这一次只进平均值；等一个干净样本到了，下界才是链自己。
+     */
+    @Test
+    void aVersionPollSampleDoesNotSetTheFloor() {
+        metrics.record("sandbox.exit", 8, 7, true);   // 多那一条是 SELECT version FROM content_version
+        Map<String, Object> row = metrics.snapshot().get(0);
+        assertNull(row.get("minSql"), "唯一样本带着 TTL 读库就不给下界：" + row);
+        assertEquals(7.0, (Double) row.get("avgSql"), 0.001, "那条 SELECT 照样是真实成本，平均值该看得见");
+
+        metrics.record("sandbox.exit", 8, 6);
+        assertEquals(6L, metrics.snapshot().get(0).get("minSql"), "干净样本一到，量到的就是这条链自己");
+    }
+
+    /**
+     * 预算读的是干净样本的<b>中位数</b>（{@code p50Sql}），不是最省那一次。
+     *
+     * <p>同一条链有好几条分支：{@code ad.request} 真签发那一次要查在途工单、清过期、插新单、写回存档（7 条），
+     * 而"上一次观看还没结束"那一支只走 4 条就回一个 200。两者都是干净样本（都进了结算、都没被拒），
+     * 所以最小值天然读到便宜的那一支。实测更夸张：{@code market.consumable} 的 minSql 是 1（会话缓存命中），
+     * 而它最费的那条分支是 8——拿最小值当预算，往贵分支加 N+1 是量不到的。
+     * 最大值又不能当预算：一次性的建档分支（{@code state} 首次 INSERT 存档 + 版本行 + 清理）天然把每个
+     * 意图的上限都抬高一条，那条预算会常红。中位数两边都不骗：加一次每次都发的查询，它就跟着涨。
+     */
+    @Test
+    void theBudgetRidesTheMedianCleanSampleNotTheCheapest() {
+        metrics.record("ad.request", 6, 4);
+        metrics.record("ad.request", 6, 4);          // 重复工单那一支
+        metrics.record("ad.request", 9, 7);
+        metrics.record("ad.request", 9, 7);
+        metrics.record("ad.request", 9, 7);          // 真签发那一支：占多数
+        metrics.record("ad.request", 9, 12, true);   // 替内容缓存干过活：三个数都不进
+
+        Map<String, Object> row = metrics.snapshot().get(0);
+        assertEquals(4L, row.get("minSql"), "最省的那条分支，留着给运维看形状：" + row);
+        assertEquals(7L, row.get("maxCleanSql"), "最费的干净分支：一次性的建档会把它抬高，所以不当预算：" + row);
+        assertEquals(7L, row.get("p50Sql"), "多数调用走贵的那条分支时，中位数就该落在 7：" + row);
+        assertEquals(6.8, (Double) row.get("avgSql"), 0.001, "平均值是含脏样本的另一个口径：" + row);
+    }
+
+    /**
+     * 一条意图如果<b>每个</b>样本都落在缓存窗口里，宁可没有下界也不给一个假的。
      *
      * <p>这是上一段注释里那个坑的正面：读的人必须看得见"这条没判"，而不是拿 7 当成链的形状去追因。
      */
     @Test
-    void anIntentSeenOnlyThroughARebuildHasNoFloor() {
+    void anIntentSeenOnlyThroughCacheWorkHasNoFloor() {
         metrics.record("cold.only", 5, 7, true);
         metrics.record("cold.only", 5, 8, true);
 
@@ -174,11 +218,11 @@ class IntentTraceTest {
 
     /* ---------------- 3. 拦截器：begin/end 必须配对 ---------------- */
 
-    /** 重建计数器：模拟"这一次请求里注册表重攒了包"，测试自己就能拨它。 */
-    private long rebuildCounter;
+    /** 内容缓存总账的替身计数器：模拟"这一次请求里缓存替这条意图干了活"，测试自己就能拨它。 */
+    private long cacheWorkCounter;
 
     private IntentTraceInterceptor interceptor() {
-        return new IntentTraceInterceptor(metrics, () -> rebuildCounter);
+        return new IntentTraceInterceptor(metrics, () -> cacheWorkCounter);
     }
 
     /** 一次真实形状：preHandle 起表，中途跑三条 SQL，afterCompletion 结算并清线程。 */
@@ -200,24 +244,26 @@ class IntentTraceTest {
     }
 
     /**
-     * 请求进行中内容快照涨了 ⇒ 这一次被标成"带着重建"，不进预算的下界。
+     * 请求进行中内容缓存干了活（整包重攒，或版本号真读了一次库）⇒ 这一次被标成脏样本，不进预算的下界。
      *
-     * <p>拦截器判的是"preHandle 读到几个、afterCompletion 读到几个"，所以哪怕重建发生在结算中途
-     * （正是真实的那一种：意图里第一次 {@code registry.current()} 才会重建），也抓得到。
+     * <p>拦截器判的是"preHandle 读到几个、afterCompletion 读到几个"，所以哪怕这件事发生在结算中途
+     * （正是真实的那一种：意图里第一次 {@code registry.current()} 才会重攒／第一次跨过 TTL），也抓得到。
+     * 这里喂的是一个自己拨的计数器——{@code ContentRegistry.cacheWork()} 怎么把两种活合成一个会涨的数，
+     * 另有 {@code ContentCacheWorkTest} 钉。
      */
     @Test
-    void aRebuildDuringTheRequestIsMarkedAndKeptOutOfTheFloor() {
+    void cacheWorkDuringTheRequestIsMarkedAndKeptOutOfTheFloor() {
         MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/game/claim.ach");
         IntentTraceInterceptor it = interceptor();
-        rebuildCounter = 3;
+        cacheWorkCounter = 3;
         assertTrue(it.preHandle(req, new MockHttpServletResponse(), new Object()));
         for (int i = 0; i < 7; i++) SqlCounter.inc();
-        rebuildCounter = 4;                      // 结算中途注册表重攒了包
+        cacheWorkCounter = 4;                      // 结算中途内容缓存替这条意图干了一次活
         it.afterCompletion(req, new MockHttpServletResponse(), new Object(), null);
 
         Map<String, Object> row = metrics.snapshot().get(0);
-        assertEquals(1L, row.get("rebuildSqlSamples"), "该被标成重建窗口：" + row);
-        assertNull(row.get("minSql"), "只有重建样本时不给下界，别让 7 条被读成链路的形状：" + row);
+        assertEquals(1L, row.get("coldSqlSamples"), "该被标成脏样本：" + row);
+        assertNull(row.get("minSql"), "只有脏样本时不给下界，别让 7 条被读成链路的形状：" + row);
 
         // 同一线程再来一次干净的：这次该进下界，平均值也照常合并
         MockHttpServletRequest again = new MockHttpServletRequest("POST", "/api/game/claim.ach");
@@ -226,6 +272,36 @@ class IntentTraceTest {
         for (int i = 0; i < 4; i++) SqlCounter.inc();
         it2.afterCompletion(again, new MockHttpServletResponse(), new Object(), null);
         assertEquals(4L, metrics.snapshot().get(0).get("minSql"), "温缓存那一次才是这条链自己");
+    }
+
+    /**
+     * 被挡回去的那一次不许当上"最小值"。
+     *
+     * <p>401 令牌失效、403 宵禁、429 限流都只走到会话校验就返回，一条 SQL 而已。回归里这种请求
+     * 到处都是（每一个负向断言都是一次），把它们算进下界，"单次意图 ≤6 条 SQL"就会永远读到 1 而全绿
+     * ——那是比报错了更难发现的失效：尺子看着在量，其实量的是拒单。
+     */
+    @Test
+    void aRejectedRequestDoesNotBecomeTheCheapestSample() {
+        MockHttpServletRequest denied = new MockHttpServletRequest("POST", "/api/game/bench.place");
+        IntentTraceInterceptor it = interceptor();
+        it.preHandle(denied, new MockHttpServletResponse(), new Object());
+        SqlCounter.inc();                                  // 只查了会话就回 403
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        res.setStatus(403);
+        it.afterCompletion(denied, res, new Object(), null);
+
+        Map<String, Object> row = metrics.snapshot().get(0);
+        assertEquals(1L, row.get("coldSqlSamples"), "被拒的那次该标成脏样本：" + row);
+        assertNull(row.get("minSql"), "只有被拒样本时不给下界：一条会话校验不是这条链的形状");
+
+        // 真跑通的那一次才是链：200 + 六条 SQL
+        MockHttpServletRequest done = new MockHttpServletRequest("POST", "/api/game/bench.place");
+        IntentTraceInterceptor it2 = interceptor();
+        it2.preHandle(done, new MockHttpServletResponse(), new Object());
+        for (int i = 0; i < 6; i++) SqlCounter.inc();
+        it2.afterCompletion(done, new MockHttpServletResponse(), new Object(), null);
+        assertEquals(6L, metrics.snapshot().get(0).get("minSql"), "200 的那次一进，下界就是这条链自己");
     }
 
     /**
