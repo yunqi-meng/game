@@ -156,6 +156,9 @@
     var box = document.createElement("div");
     box.className = "toast " + (cls || "");
     box.textContent = msg;
+    /* 错误用 boom 重震提醒"刚才没成"；奖励类不另振——多数成功动作本来就走
+       sfx.play 的音效+触感联动，toast 再振一遍就成"每一跳都振"了 */
+    if (cls === "bad") CHEM.sfx.buzz("boom");
     U.$("toasts").appendChild(box);
     setTimeout(function () { box.remove(); }, 2800);
   };

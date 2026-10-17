@@ -1418,3 +1418,27 @@ button:focus-visible, .inp:focus-visible, #sel-mult:focus-visible { outline: non
    会丢掉自动居中，所以单开一条块级 flex。 */
 .gate-forgot { display: flex; align-items: center; justify-content: center; }
 
+/* ---------- 18. 移动端视口与触屏体验 ----------
+   命中区（第 17 节）之外的四块真实短板 + 触觉：
+   1) text-size-adjust：安卓 WebView 的字体自动放大（text autosizing）会把 12px 小字
+      自作主张撑到 16px+，紧凑布局当场爆掉；锁死 100% 才轮到我们自己的字号说话。
+   2) overscroll-behavior：房间页签横滑、面板竖滑到头时，滚动会链到整页，
+      在安卓上表现为整页橡皮筋/下拉刷新晃动。body 一刀切 none，内部滚动区 contain。
+   3) touch-action: manipulation：快速连点「反应」会触发浏览器双击缩放
+      （viewport 特意不禁缩放是 H5 的无障碍决定，不能推翻）。
+      manipulation 只禁双击缩放、保留双指缩放，两头都顾住。
+   4) hover 粘滞：触屏 tap 后 :hover 态会一直挂着——卡片浮着、行亮着，
+      直到点别处才落回去。hover:none 媒体查询只对纯触屏设备生效，
+      桌面与「平板接鼠标」场景（hover:hover）不受影响。 */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { overscroll-behavior: none; }
+#room-tabs, #qs-row, #modal-card { overscroll-behavior: contain; }
+button, select, #vessel-card { touch-action: manipulation; }
+@media (hover: none) {
+  .item-card:hover { transform: none; border-color: var(--line); box-shadow: var(--e1); }
+  #placed-list li b:hover { color: inherit; background: transparent; }
+  /* .you 是排行榜里"我自己"的金色高亮行，hover 重置不许把它抹掉 */
+  .row:hover:not(.you) { background: transparent; }
+  .eqrow:hover { background: transparent; }
+}
+

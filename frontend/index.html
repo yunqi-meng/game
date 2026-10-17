@@ -5,12 +5,12 @@
 <!-- H5：原来这里还带着 maximum-scale=1, user-scalable=no（禁掉系统缩放）。
      低视力玩家靠的就是双指放大，禁它等于把人挡在门外；布局已按 dvh + flex 走，
      放大只会多一层滚动，不会把台面挤坏。 -->
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#10497f">
 <title>化学实验室：元素纪元</title>
 <link rel="apple-touch-icon" href="images/icon-512.png">
 <link rel="icon" type="image/png" href="images/icon-512.png">
-<link rel="stylesheet" href="css/style.css?v=3.15">
+<link rel="stylesheet" href="css/style.css?v=3.16">
 </head>
 <body>
 <div id="app">
@@ -193,27 +193,27 @@
   </div>
 </div>
 
-<script src="js/data/elements.js?v=3.15"></script>
-<script src="js/data/compounds.js?v=3.15"></script>
-<script src="js/data/reactions.js?v=3.15"></script>
-<script src="js/data/instruments.js?v=3.15"></script>
+<script src="js/data/elements.js?v=3.16"></script>
+<script src="js/data/compounds.js?v=3.16"></script>
+<script src="js/data/reactions.js?v=3.16"></script>
+<script src="js/data/instruments.js?v=3.16"></script>
 <!-- 壳内配置注入点：APK 打包时由 gradle 用真实域名覆写此文件（浏览器里它是空的=同源） -->
-<script src="js/app-config.js?v=3.15"></script>
+<script src="js/app-config.js?v=3.16"></script>
 <!-- 原生桥：必须在 cloud.js 之前，令牌存储与 API base 解析都要问它 -->
-<script src="js/shell.js?v=3.15"></script>
-<script src="js/content.js?v=3.15"></script>
-<script src="js/state.js?v=3.15"></script>
-<script src="js/engine.js?v=3.15"></script>
-<script src="js/fx.js?v=3.15"></script>
-<script src="js/sfx.js?v=3.15"></script>
-<script src="js/cloud.js?v=3.15"></script>
-<script src="js/ads.js?v=3.15"></script>
-<script src="js/curfew.js?v=3.15"></script>
-<script src="js/gate.js?v=3.15"></script>
-<script src="js/icons.js?v=3.15"></script>
-<script src="js/ui.js?v=3.15"></script>
-<script src="js/panels.js?v=3.15"></script>
-<script src="js/game.js?v=3.15"></script>
-<script src="js/main.js?v=3.15"></script>
+<script src="js/shell.js?v=3.16"></script>
+<script src="js/content.js?v=3.16"></script>
+<script src="js/state.js?v=3.16"></script>
+<script src="js/engine.js?v=3.16"></script>
+<script src="js/fx.js?v=3.16"></script>
+<script src="js/sfx.js?v=3.16"></script>
+<script src="js/cloud.js?v=3.16"></script>
+<script src="js/ads.js?v=3.16"></script>
+<script src="js/curfew.js?v=3.16"></script>
+<script src="js/gate.js?v=3.16"></script>
+<script src="js/icons.js?v=3.16"></script>
+<script src="js/ui.js?v=3.16"></script>
+<script src="js/panels.js?v=3.16"></script>
+<script src="js/game.js?v=3.16"></script>
+<script src="js/main.js?v=3.16"></script>
 </body>
 </html>

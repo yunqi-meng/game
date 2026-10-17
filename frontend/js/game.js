@@ -509,6 +509,7 @@
       if (!s || s.kind === "consumable") return;
       var bonus = s.level >= 1 ? st.discoverBonus(id, false) : 50;
       U.toast("🎉 发现新物质【" + s.zh + "】，获得发现奖金 " + bonus + " 金币！", "good");
+      CHEM.sfx.buzz("discover"); /* 双脉冲庆祝节奏，和普通到账的轻震区分开 */
     });
   };
 

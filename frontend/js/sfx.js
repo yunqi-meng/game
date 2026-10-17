@@ -62,10 +62,11 @@
   };
 
   /* ---------- 触感（H4） ----------
-     全站原先一处 navigator.vibrate 都没有：合成成功、实验事故、升级这三种"结果已定"的时刻
-     只有画面和声音，手机握在手里却没有反馈。只给这三处，且都是 10–20ms 的单次短振——
-     长振动既费电又更像故障，而点击类反馈每一跳都振一遍只会让人关掉它。 */
-  var BUZZ = { success: 12, boom: 20, levelup: 16 };
+     合成成功、实验事故、升级、点亮图鉴四种"结果已定"的时刻只有画面和声音，
+     手机握在手里却没有反馈。都是 10–20ms 的短振（discover 是 12-70-12 的
+     双脉冲庆祝节奏）——长振动既费电又更像故障，而点击类反馈每一跳都振
+     一遍只会让人关掉它。 */
+  var BUZZ = { success: 12, boom: 20, levelup: 16, discover: [12, 70, 12] };
   var HK = "chemera.haptic";
   function hapticOn() {
     try { return localStorage.getItem(HK) !== "off"; } catch (e) { return true; }   // 隐私模式取不到：按默认开
